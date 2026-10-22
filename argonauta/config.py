@@ -24,19 +24,20 @@ SECRET_ENV_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
 
 # Only these keys are read from a repository's .env. A cloned repository must
 # not be able to point the SDK at another endpoint (ANTHROPIC_BASE_URL, proxy
-# variables, ...) and so exfiltrate a key that lives in the user's shell.
+# variables, ...), choose a command for `apply` to execute
+# (ARGONAUTA_TEST_COMMAND), or swap the provider for one that replays a file
+# (ARGONAUTA_PROVIDER / ARGONAUTA_SCRIPTED_DIFF). Those come only from the
+# real shell environment or from `argonauta config`.
 DOTENV_ALLOWLIST = (
     "ANTHROPIC_API_KEY",
-    "ARGONAUTA_PROVIDER",
     "ARGONAUTA_MODEL",
     "ARGONAUTA_EFFORT",
     "ARGONAUTA_FALLBACKS",
-    "ARGONAUTA_SCRIPTED_DIFF",
     "ARGONAUTA_MAX_CONTEXT_FILES",
     "ARGONAUTA_MAX_CONTEXT_BYTES",
-    "ARGONAUTA_TEST_COMMAND",
     "ARGONAUTA_TEST_TIMEOUT",
 )
+SHELL_ONLY_VARS = ("ARGONAUTA_TEST_COMMAND", "ARGONAUTA_PROVIDER", "ARGONAUTA_SCRIPTED_DIFF")
 
 
 class ConfigError(ValueError):
