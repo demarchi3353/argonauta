@@ -184,3 +184,91 @@ def test_unknown_or_missing_repo_is_404(api, tmp_path):
 
 def test_unknown_job_is_404(api):
     assert api.get("/api/jobs/j_nope")[0] == 404
+
+
+# ----- git actions (Task 8) -----------------------------------------------------
+def test_stage_unstage_discard_commit(api):
+    repo = api.repo
+    (repo.path / "README.md").write_text("edited\n")
+    (repo.path / "junk.txt").write_text("junk\n")
+    assert api.post(f"/api/repos/{repo.id}/stage", {"paths": ["README.md"]})[0] == 200
+    assert [e["path"] for e in api.get(f"/api/repos/{repo.id}/state")[1]["status"]["staged"]] == ["README.md"]
+    assert api.post(f"/api/repos/{repo.id}/unstage", {"paths": ["README.md"]})[0] == 200
+    assert api.post(f"/api/repos/{repo.id}/stage", {"paths": ["../etc"]})[0] == 400
+    assert api.post(f"/api/repos/{repo.id}/stage", {"paths": []})[0] == 400
+    assert api.post(f"/api/repos/{repo.id}/discard", {"paths": ["junk.txt"]})[0] == 200
+    assert not (repo.path / "junk.txt").exists()
+    api.post(f"/api/repos/{repo.id}/stage", {"paths": ["README.md"]})
+    status, data = api.post(f"/api/repos/{repo.id}/commit", {"message": "from the ui"})
+    assert status == 201 and len(data["sha"]) == 40
+    assert git(repo.path, "log", "-1", "--format=%s").strip() == "from the ui"
+    assert api.post(f"/api/repos/{repo.id}/commit", {"message": "nothing staged"})[0] == 409
+
+
+def test_commit_rejects_bad_message(api):
+    repo = api.repo
+    (repo.path / "README.md").write_text("edited\n")
+    api.post(f"/api/repos/{repo.id}/stage", {"paths": ["README.md"]})
+    head = git(repo.path, "rev-parse", "HEAD")
+    assert api.post(f"/api/repos/{repo.id}/commit", {"message": "   "})[0] == 400
+    assert api.post(f"/api/repos/{repo.id}/commit", {"message": "x" * 5001})[0] == 400
+    assert api.post(f"/api/repos/{repo.id}/commit", {"message": 5})[0] == 400
+    assert git(repo.path, "rev-parse", "HEAD") == head
+
+
+def test_branch_name_validated_and_lifecycle(api):
+    repo = api.repo
+    assert api.post(f"/api/repos/{repo.id}/branches", {"name": "bad name"})[0] == 400
+    assert api.post(f"/api/repos/{repo.id}/branches", {"name": "a..b"})[0] == 400
+    assert api.post(f"/api/repos/{repo.id}/branches", {"name": "feat/ui"})[0] == 201
+    assert api.post(f"/api/repos/{repo.id}/checkout", {"name": "feat/ui"})[0] == 200
+    assert api.get(f"/api/repos/{repo.id}/state")[1]["branch"] == "feat/ui"
+    assert api.request("DELETE", f"/api/repos/{repo.id}/branches/feat%2Fui")[0] == 409  # current branch
+    main = [b["name"] for b in api.get(f"/api/repos/{repo.id}/state")[1]["branches"] if b["name"] in ("main", "master")][0]
+    api.post(f"/api/repos/{repo.id}/checkout", {"name": main})
+    assert api.request("DELETE", f"/api/repos/{repo.id}/branches/feat%2Fui")[0] == 200
+    assert api.post(f"/api/repos/{repo.id}/checkout", {"name": "nope"})[0] == 409
+
+
+def test_fetch_pull_push_jobs(api, tmp_path):
+    repo = api.repo
+    bare = tmp_path / "remote.git"
+    git(repo.path, "init", "--bare", "-q", str(bare))
+    git(repo.path, "remote", "add", "origin", str(bare))
+    status, data = api.post(f"/api/repos/{repo.id}/jobs/push", {"set_upstream": True})
+    assert status == 202
+    job = api.wait_job(data["job"]["id"])
+    assert job["status"] == "done", job
+    for kind in ("fetch", "pull"):
+        status, data = api.post(f"/api/repos/{repo.id}/jobs/{kind}")
+        assert status == 202 and api.wait_job(data["job"]["id"])["status"] == "done"
+    state = api.get(f"/api/repos/{repo.id}/state")[1]
+    assert state["ahead"] == 0 and state["upstream"].startswith("origin/")
+
+
+def test_push_without_credentials_fails_fast(api, monkeypatch):
+    repo = api.repo
+    git(repo.path, "remote", "add", "origin", "ssh://git@127.0.0.1:9/none.git")
+    monkeypatch.setenv("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=2")
+    status, data = api.post(f"/api/repos/{repo.id}/jobs/push", {"set_upstream": True})
+    assert status == 202
+    job = api.wait_job(data["job"]["id"], timeout=60)
+    assert job["status"] == "failed" and job["error"]
+
+
+def test_second_job_for_same_repo_is_409(api, tmp_path):
+    repo = api.repo
+    bare = tmp_path / "remote.git"
+    git(repo.path, "init", "--bare", "-q", str(bare))
+    git(repo.path, "remote", "add", "origin", str(bare))
+    import threading
+    gate = threading.Event()
+    original = api.ctx.jobs.submit
+    def slow_submit(kind, rid, fn):
+        return original(kind, rid, lambda p: (gate.wait(5), fn(p))[1])
+    api.ctx.jobs.submit = slow_submit
+    first = api.post(f"/api/repos/{repo.id}/jobs/fetch")
+    second = api.post(f"/api/repos/{repo.id}/jobs/fetch")
+    gate.set()
+    assert first[0] == 202 and second[0] == 409 and second[1]["job"]["id"] == first[1]["job"]["id"]
+    api.wait_job(first[1]["job"]["id"])
