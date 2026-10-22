@@ -13,3 +13,7 @@ __pycache__/
 
 # Argonauta's own per-repository data store (private, local)
 .argonauta/
+
+# Local design notes and plans are not part of the repository
+docs/
+.superpowers/
