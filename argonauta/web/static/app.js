@@ -315,22 +315,31 @@
   window.addEventListener("resize", () => S.terminals.forEach((e) => { if (!e.pane.hidden) e.fit.fit(); }));
 
   // ----- model settings (user-level, ~/.config/argonauta/settings.json) ------------------
+  function pill(id, kind, text) { const el = $("#" + id); el.className = "pill" + (kind ? " " + kind : ""); el.textContent = text; }
+  function syncLocalSection() {
+    const picked = $$('#provider-choice input[name="provider"]').find((r) => r.checked);
+    $("#local-section").hidden = !(picked && picked.value === "local");
+  }
   async function openModelDialog() {
     const d = $("#model-dialog"), err = $("#model-error"), res = $("#model-test-result");
     err.textContent = ""; res.textContent = ""; $("#model-list").innerHTML = "";
     let cur;
     try { cur = await api("GET", "/api/settings/model"); } catch (e) { toast("bad", e.message, true); return; }
     $("#model-url").value = cur.local_url || ""; $("#model-name").value = cur.local_model || ""; $("#model-remote").checked = !!cur.local_allow_remote;
-    const src = cur.sources || {};
+    const src = cur.sources || {}, cc = cur.claude_cli || {};
     const choice = $$('#provider-choice input[name="provider"]').find((r) => r.value === (cur.provider_choice || "auto")) || $('#provider-choice input[value="auto"]');
     choice.checked = true;
     $$('#provider-choice input[name="provider"]').forEach((r) => { r.disabled = src.provider === "shell"; });
-    const cc = cur.claude_cli || {};
-    $("#claude-cli-status").textContent = !cc.installed ? "(claude not found on PATH)" : cc.logged_in === true ? "(installed, logged in" + (cc.auth_method ? " via " + cc.auth_method : "") + ")" : cc.logged_in === false ? "(installed, not logged in: run `claude auth login`)" : "(installed)";
+    pill("pill-auto", "", "picks: " + cur.effective_provider);
+    pill("pill-anthropic", cur.anthropic_key_present ? "ok" : "", cur.anthropic_key_present ? "key present" : "no key in .env");
+    pill("pill-local", cur.local_model ? "ok" : "warn", cur.local_model ? cur.local_model : "no model set");
+    pill("pill-claude-cli", !cc.installed ? "bad" : cc.logged_in === true ? "ok" : cc.logged_in === false ? "warn" : "", !cc.installed ? "claude not found" : cc.logged_in === true ? "logged in" + (cc.auth_method ? " via " + cc.auth_method : "") : cc.logged_in === false ? "not logged in" : "installed");
+    pill("pill-manual", "", "always available");
     const shellBound = Object.keys(src).filter((k) => src[k] === "shell");
-    $("#model-status").textContent = "Active now: " + cur.provider + (cur.anthropic_key_present ? " (an Anthropic key is set, so it takes precedence over the local model)" : "") + (shellBound.length ? ". Set in your shell and read-only here: " + shellBound.join(", ") : "");
+    $("#model-status").textContent = "Active now: " + cur.provider + (shellBound.length ? ". Set in your shell, read-only here: " + shellBound.join(", ") + "." : ".");
     $("#model-url").disabled = src.local_url === "shell"; $("#model-name").disabled = src.local_model === "shell"; $("#model-remote").disabled = src.local_allow_remote === "shell";
-    d.showModal(); $("#model-url").focus();
+    syncLocalSection();
+    d.showModal(); choice.focus();
   }
   async function testModelConnection() {
     const res = $("#model-test-result"), btn = $("#model-test");
@@ -398,6 +407,7 @@
     $("#btn-model").addEventListener("click", openModelDialog);
     $("#model-test").addEventListener("click", testModelConnection);
     $("#model-form").addEventListener("submit", saveModelSettings);
+    $("#provider-choice").addEventListener("change", syncLocalSection);
     $("#model-cancel").addEventListener("click", () => $("#model-dialog").close());
     $$(".right .tab").forEach((t) => t.addEventListener("click", () => { if (t.dataset.tab === "credentials") showCredentials(); else selectTab("right", "detail"); }));
     $("#bottom-tabs").addEventListener("click", (ev) => { const t = ev.target.closest(".tab"); if (t && !ev.target.classList.contains("close")) selectTab("bottom", t.dataset.tab); });

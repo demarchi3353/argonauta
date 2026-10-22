@@ -160,38 +160,55 @@
     </div>
   </form>
 </dialog>
-<dialog id="model-dialog" class="dialog wide">
-  <form id="model-form" method="dialog">
-    <h2>Model for the assistant</h2>
-    <p id="model-status" class="muted"></p>
-    <fieldset id="provider-choice">
-      <legend>Provider</legend>
-      <label class="check"><input type="radio" name="provider" value="auto"> Automatic: an Anthropic API key if present, else the local server below if a model is set, else manual</label>
-      <label class="check"><input type="radio" name="provider" value="local"> Local model server (configured below)</label>
-      <label class="check"><input type="radio" name="provider" value="claude-cli"> Claude Code CLI, under your Claude subscription <span id="claude-cli-status" class="muted small"></span></label>
-      <label class="check"><input type="radio" name="provider" value="manual"> Manual: write a prompt bundle, you paste the diff back</label>
-    </fieldset>
-    <fieldset>
-      <legend>Local model server (OpenAI-compatible: Ollama, LM Studio, llama.cpp, vLLM)</legend>
-      <label for="model-url">Server URL</label>
-      <input id="model-url" type="url" placeholder="http://127.0.0.1:11434/v1" maxlength="2000" spellcheck="false">
-      <label class="check"><input type="checkbox" id="model-remote"> Allow a server on another machine (your task and the selected files are sent there)</label>
-      <div class="row">
-        <button class="btn" id="model-test" type="button"><svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg>Test connection</button>
-        <span id="model-test-result" class="muted" aria-live="polite"></span>
-      </div>
-      <label for="model-name">Model</label>
-      <div class="row">
-        <input id="model-name" type="text" placeholder="e.g. qwen2.5-coder:7b" maxlength="200" spellcheck="false" list="model-list">
-        <datalist id="model-list"></datalist>
-      </div>
-      <p class="muted small">On the other machine, Ollama must listen on all interfaces: <code>OLLAMA_HOST=0.0.0.0 ollama serve</code>. These values are stored in <code>~/.config/argonauta/settings.json</code>; shell variables (<code>ARGONAUTA_LOCAL_*</code>) override them.</p>
-    </fieldset>
-    <div id="model-error" class="field-error" role="alert"></div>
-    <div class="row end">
-      <button class="btn" value="cancel" type="button" id="model-cancel">Cancel</button>
-      <button class="btn primary" value="ok" type="submit" id="model-save">Save</button>
+<dialog id="model-dialog" class="sheet" aria-labelledby="model-title">
+  <form id="model-form" method="dialog" class="sheet-body">
+    <header class="sheet-head">
+      <h2 id="model-title" class="sheet-title">Which model answers proposals</h2>
+      <p id="model-status" class="sheet-sub"></p>
+    </header>
+
+    <div id="provider-choice" class="opts" role="radiogroup" aria-label="Provider">
+      <label class="opt"><input type="radio" name="provider" value="auto">
+        <span class="opt-text"><span class="opt-name">Automatic</span><span class="opt-desc">Uses an Anthropic API key if one is set, otherwise the local server below if it has a model, otherwise manual.</span></span>
+        <span class="pill" id="pill-auto"></span></label>
+      <label class="opt"><input type="radio" name="provider" value="anthropic">
+        <span class="opt-text"><span class="opt-name">Anthropic API</span><span class="opt-desc">Pay per token with the key in <code>.env</code>.</span></span>
+        <span class="pill" id="pill-anthropic"></span></label>
+      <label class="opt"><input type="radio" name="provider" value="local">
+        <span class="opt-text"><span class="opt-name">Local model server</span><span class="opt-desc">Ollama, LM Studio, llama.cpp or vLLM on this machine or your network.</span></span>
+        <span class="pill" id="pill-local"></span></label>
+      <label class="opt"><input type="radio" name="provider" value="claude-cli">
+        <span class="opt-text"><span class="opt-name">Claude Code CLI</span><span class="opt-desc">Runs <code>claude -p</code> under your Claude subscription. No API key.</span></span>
+        <span class="pill" id="pill-claude-cli"></span></label>
+      <label class="opt"><input type="radio" name="provider" value="manual">
+        <span class="opt-text"><span class="opt-name">Manual</span><span class="opt-desc">Writes a prompt bundle; you paste the diff back with <code>--from-diff</code>.</span></span>
+        <span class="pill" id="pill-manual"></span></label>
     </div>
+
+    <section id="local-section" class="srv" aria-labelledby="srv-title">
+      <h3 id="srv-title" class="srv-title">Local model server</h3>
+      <div class="field">
+        <label for="model-url">Server URL</label>
+        <input id="model-url" type="url" placeholder="http://127.0.0.1:11434/v1" maxlength="2000" spellcheck="false">
+      </div>
+      <label class="switch"><input type="checkbox" id="model-remote"><span>Allow a server on another machine. Your task and the selected files are sent there, over plain HTTP.</span></label>
+      <div class="field">
+        <label for="model-name">Model</label>
+        <div class="field-row">
+          <input id="model-name" type="text" placeholder="qwen2.5-coder:7b" maxlength="200" spellcheck="false" list="model-list">
+          <datalist id="model-list"></datalist>
+          <button class="btn" id="model-test" type="button"><svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg>Test connection</button>
+        </div>
+        <p id="model-test-result" class="field-hint" aria-live="polite"></p>
+      </div>
+      <p class="field-hint">On the other machine run <code>OLLAMA_HOST=0.0.0.0 ollama serve</code>. Saved to <code>~/.config/argonauta/settings.json</code>; shell variables <code>ARGONAUTA_LOCAL_*</code> override it.</p>
+    </section>
+
+    <div id="model-error" class="field-error" role="alert"></div>
+    <footer class="sheet-foot">
+      <button class="btn" type="button" id="model-cancel">Cancel</button>
+      <button class="btn primary" type="submit" id="model-save">Save</button>
+    </footer>
   </form>
 </dialog>
 <dialog id="help" class="dialog">

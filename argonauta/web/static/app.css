@@ -134,13 +134,39 @@ h3 { font-size: 12px; margin: 10px 0 4px; color: var(--muted); display: flex; al
 .tab .ic { opacity: .8; }
 .btn:disabled { cursor: not-allowed; }
 
-/* model settings dialog */
-.dialog.wide { min-width: 520px; max-width: 640px; }
-.dialog fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 10px 0; display: flex; flex-direction: column; gap: 6px; }
-.dialog legend { color: var(--muted); font-size: 12px; padding: 0 4px; }
-.dialog label { font-size: 12px; color: var(--muted); }
-.dialog .check { color: var(--text); }
-.small { font-size: 12px; }
-.dialog code { font-family: ui-monospace, Menlo, monospace; font-size: 11px; background: var(--bg); padding: 1px 4px; border-radius: 4px; }
-.dialog .check { display: flex; align-items: flex-start; gap: 8px; text-align: left; }
-.dialog .check input { margin: 3px 0 0; flex: none; }
+/* ----- model sheet: provider choice as a readiness list ----- */
+.sheet { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text); padding: 0; width: min(560px, 92vw); max-height: 88vh; overflow: hidden; box-shadow: 0 24px 60px rgba(0,0,0,.35); }
+.sheet::backdrop { background: rgba(0,0,0,.45); }
+.sheet-body { display: flex; flex-direction: column; max-height: 88vh; overflow: auto; }
+.sheet-head { padding: 18px 20px 12px; border-bottom: 1px solid var(--line); }
+.sheet-title { font-size: 16px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--text); margin: 0; }
+.sheet-sub { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+.opts { display: flex; flex-direction: column; padding: 6px 10px; }
+.opt { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: start; padding: 8px 10px; border-radius: 8px; border-left: 3px solid transparent; cursor: pointer; }
+.opt:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.opt:has(input:checked) { background: color-mix(in srgb, var(--accent) 14%, transparent); border-left-color: var(--accent); }
+.opt:has(input:disabled) { cursor: not-allowed; opacity: .6; }
+.opt input { margin: 3px 0 0; accent-color: var(--accent); }
+.opt-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.opt-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.opt-desc { font-size: 12px; color: var(--muted); line-height: 1.4; }
+.opt code, .srv code, .field-hint code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; background: var(--bg); padding: 1px 4px; border-radius: 4px; }
+.pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; margin-top: 2px; }
+.pill.ok { border-color: var(--ok); color: var(--ok); }
+.pill.warn { border-color: var(--warn); color: var(--warn); }
+.pill.bad { border-color: var(--bad); color: var(--bad); }
+.srv { padding: 12px 20px 4px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+.srv[hidden] { display: none; }
+.srv-title { font-size: 13px; font-weight: 600; margin: 0; color: var(--text); display: block; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field > label { font-size: 12px; color: var(--muted); }
+.field input, .sheet input[type=url], .sheet input[type=text] { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+.field input:disabled { opacity: .6; }
+.field-row { display: flex; gap: 8px; align-items: center; }
+.field-row input { flex: 1; }
+.field-hint { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.45; }
+.switch { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; font-size: 12px; color: var(--text); line-height: 1.4; }
+.switch input { margin: 2px 0 0; accent-color: var(--accent); }
+.sheet .field-error { padding: 0 20px; }
+.sheet-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px 14px; border-top: 1px solid var(--line); margin-top: auto; }
+@media (prefers-reduced-motion: no-preference) { .opt { transition: background-color .12s ease; } }
