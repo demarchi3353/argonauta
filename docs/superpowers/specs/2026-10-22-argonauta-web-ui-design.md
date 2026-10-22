@@ -243,6 +243,10 @@ Behaviour:
 - Theme follows `prefers-color-scheme`; both themes meet WCAG AA contrast;
   status never relies on colour alone (symbols and text).
 - No external fonts or scripts; xterm.js is served from the package.
+- Implementation note: lane assignment runs server-side in `web/graph.py` so
+  it is unit-tested in Python; the page only draws. Same-origin `fetch()`
+  GETs carry no `Origin` header, so the API rejects a foreign Origin and
+  allows an absent one; WebSocket upgrades must present it.
 
 ### Events
 
