@@ -35,13 +35,13 @@ never opens a network connection.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `ANTHROPIC_API_KEY` | unset | Enables the model provider. Only checked for presence, never logged. |
-| `ARGONAUTA_PROVIDER` | `auto` | `auto`, `anthropic`, `manual`, or `scripted` (test only). |
+| `ARGONAUTA_PROVIDER` | `auto` | `auto`, `anthropic`, `manual`, or `scripted` (test only). Shell only. |
 | `ARGONAUTA_MODEL` | `claude-opus-5-5` | Model id for proposals. |
 | `ARGONAUTA_EFFORT` | `medium` | `low` to `max`; controls reasoning depth and cost. |
 | `ARGONAUTA_FALLBACKS` | `default` | Server-side refusal fallbacks (`default` or `off`). |
 | `ARGONAUTA_MAX_CONTEXT_FILES` | `8` | Cap on files sent with a task. |
 | `ARGONAUTA_MAX_CONTEXT_BYTES` | `60000` | Cap on total bytes sent with a task. |
-| `ARGONAUTA_TEST_COMMAND` | unset | Overrides the test command saved by `init`. |
+| `ARGONAUTA_TEST_COMMAND` | unset | Overrides the test command saved by `init`. Shell only. |
 | `ARGONAUTA_TEST_TIMEOUT` | `600` | Seconds before a test run is killed. |
 
 ## The core loop
@@ -91,10 +91,12 @@ success lines prefixed with `✓` (exit 0) and failures prefixed with `✗` (exi
   summary (name, branch, file count, languages) and the contents of the selected
   context files. Use `propose --dry-run` to see that list first. Nothing else is
   ever sent anywhere.
-- **`.env` is read with an allowlist.** Only the `ANTHROPIC_API_KEY` and
-  `ARGONAUTA_*` keys listed in `.env.example` are loaded, your shell always wins
-  over the file, and the API endpoint is pinned in code. A cloned repository
-  cannot redirect requests or inject proxy settings through its `.env`.
+- **`.env` is read with an allowlist.** Only `ANTHROPIC_API_KEY` and the
+  non-executable `ARGONAUTA_*` tuning keys are loaded from the file; your shell
+  always wins over it, and the API endpoint is pinned in code. The test command,
+  provider choice and scripted-diff path are shell-only, so a cloned repository
+  cannot redirect requests, inject proxy settings, or choose what `apply`
+  executes through its `.env`.
 - **Logs** (`.argonauta/argonauta.log`) contain ids, counts, paths and status
   words. They never contain diffs, file contents or secrets; a redacting filter
   scrubs key-shaped strings as a last resort.
