@@ -27,6 +27,8 @@ sample_app = typer.Typer(help="Load or remove clearly labelled sample records.",
 config_app = typer.Typer(help="Show or change per-repository settings.", no_args_is_help=True)
 app.add_typer(sample_app, name="sample")
 app.add_typer(config_app, name="config")
+workspace_app = typer.Typer(help="Manage workspaces (groups of repositories) for the web UI.", no_args_is_help=True)
+app.add_typer(workspace_app, name="workspace")
 
 EXIT_OK, EXIT_FAIL, EXIT_INVALID = 0, 1, 2
 
@@ -608,6 +610,61 @@ def config_set_test_command(command: Annotated[str, typer.Argument(help='e.g. "p
     store.record_event("config", "test command updated")
     store.close()
     ui.success(f"Test command saved: {command}")
+
+
+@workspace_app.command("list")
+def workspace_list() -> None:
+    """List workspaces and their repositories."""
+    from argonauta.workspaces import RegistryError, open_registry
+
+    try:
+        registry = open_registry()
+    except RegistryError as exc:
+        _fail(exc, EXIT_INVALID)
+    if not registry.workspaces:
+        ui.empty_state("no workspaces", "Add one with `argonauta workspace add PATH` or from the web UI (`argonauta ui`).")
+        return
+    t = ui.table("Workspaces", ["workspace", "repository", "path", "store"])
+    for ws in registry.workspaces:
+        if not ws.repos:
+            t.add_row(ws.name, "(empty)", "", "")
+        for r in ws.repos:
+            t.add_row(ws.name, r.name, str(r.path), ("initialised" if r.initialized else "not initialised") if r.exists else "missing")
+    ui.print_table(t)
+    ui.info(f"Registry: {registry.path}")
+
+
+@workspace_app.command("add")
+def workspace_add(
+    path: Annotated[Path, typer.Argument(help="Path inside a git repository.")],
+    workspace: Annotated[str, typer.Option("--workspace", "-w", help="Workspace name (created if missing).")] = "Default",
+) -> None:
+    """Register a repository in a workspace."""
+    from argonauta.workspaces import RegistryError, open_registry
+
+    try:
+        registry = open_registry()
+        ws = next((w for w in registry.workspaces if w.name == workspace), None) or registry.add_workspace(workspace)
+        repo = registry.add_repo(ws.id, path)
+    except RegistryError as exc:
+        _fail(exc, EXIT_INVALID)
+    ui.success(f"Added {repo.path} to workspace {ws.name!r} as {repo.id}")
+
+
+@workspace_app.command("remove")
+def workspace_remove(path: Annotated[Path, typer.Argument(help="Path of a registered repository.")]) -> None:
+    """Remove a repository from every workspace."""
+    from argonauta.workspaces import RegistryError, open_registry
+
+    try:
+        registry = open_registry()
+        repo = registry.find_repo_by_path(path)
+        if repo is None:
+            raise RegistryError(f"{path} is not registered")
+        registry.remove_repo(repo.id)
+    except RegistryError as exc:
+        _fail(exc, EXIT_INVALID)
+    ui.success(f"Removed {repo.path}")
 
 
 def main() -> None:

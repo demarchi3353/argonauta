@@ -135,13 +135,15 @@ def commit(repo_root: Path, message: str) -> str:
 
 
 def revert_commit(repo_root: Path, sha: str) -> str:
-    run_git(repo_root, "revert", "--no-edit", sha)
+    run_git(repo_root, "revert", "--no-edit", END, _ref(sha))
     proc = run_git(repo_root, "rev-parse", "HEAD")
     return proc.stdout.strip()
 
 
 def commit_exists(repo_root: Path, sha: str) -> bool:
-    proc = run_git(repo_root, "cat-file", "-e", f"{sha}^{{commit}}", check=False)
+    if not sha or sha.startswith("-"):
+        return False
+    proc = run_git(repo_root, "cat-file", "-e", END, f"{sha}^{{commit}}", check=False)
     return proc.returncode == 0
 
 
@@ -189,6 +191,14 @@ def ensure_excluded(repo_root: Path, pattern: str) -> bool:
 # ----- UI extensions ----------------------------------------------------------
 REMOTE_TIMEOUT = 300
 REMOTE_ENV = {"GIT_TERMINAL_PROMPT": "0"}
+END = "--end-of-options"
+
+
+def _ref(value: str) -> str:
+    """Refuse values that git could read as a flag (defence in depth)."""
+    if not value or value.startswith("-"):
+        raise GitError(f"invalid ref {value!r}")
+    return value
 
 
 @dataclass(frozen=True)
@@ -350,7 +360,7 @@ class CommitDetail:
 
 
 def signature_status(repo_root: Path, sha: str) -> tuple[str, str, str]:
-    proc = run_git(repo_root, "log", "-1", "--format=%G?%x1f%GS%x1f%GK", sha)
+    proc = run_git(repo_root, "log", "-1", "--format=%G?%x1f%GS%x1f%GK", END, _ref(sha))
     parts = proc.stdout.strip().split("\x1f")
     while len(parts) < 3:
         parts.append("")
@@ -358,26 +368,26 @@ def signature_status(repo_root: Path, sha: str) -> tuple[str, str, str]:
 
 
 def commit_detail(repo_root: Path, sha: str) -> CommitDetail:
-    proc = run_git(repo_root, "log", "-1", f"--format={_LOG_FMT}", sha)
+    proc = run_git(repo_root, "log", "-1", f"--format={_LOG_FMT}", END, _ref(sha))
     commit = _parse_log_line(proc.stdout.strip())
     if commit is None:
         raise GitError(f"commit {sha} not found")
-    body = run_git(repo_root, "log", "-1", "--format=%b", sha).stdout.strip()
+    body = run_git(repo_root, "log", "-1", "--format=%b", END, sha).stdout.strip()
     # git honours only the last of --numstat/--name-status, so ask twice.
     statuses: dict[str, str] = {}
-    for line in run_git(repo_root, "show", "--format=", "--name-status", sha).stdout.splitlines():
+    for line in run_git(repo_root, "show", "--format=", "--name-status", END, sha).stdout.splitlines():
         parts = line.split("\t")
         if len(parts) >= 2 and parts[0]:
             statuses[parts[-1]] = parts[0][0]
     counts: dict[str, tuple[int, int]] = {}
-    for line in run_git(repo_root, "show", "--format=", "--numstat", sha).stdout.splitlines():
+    for line in run_git(repo_root, "show", "--format=", "--numstat", END, sha).stdout.splitlines():
         parts = line.split("\t")
         if len(parts) == 3:
             ins = int(parts[0]) if parts[0].isdigit() else 0
             dele = int(parts[1]) if parts[1].isdigit() else 0
             counts[parts[2]] = (ins, dele)
     files = [CommitFile(statuses.get(p, "M"), p, c[0], c[1]) for p, c in counts.items()]
-    diff = run_git(repo_root, "show", "--format=", "--patch", sha).stdout
+    diff = run_git(repo_root, "show", "--format=", "--patch", END, sha).stdout
     _, signer, key_id = signature_status(repo_root, sha)
     return CommitDetail(commit=commit, body=body, files=files, diff=diff, signer=signer, key_id=key_id)
 
@@ -433,18 +443,18 @@ def valid_branch_name(repo_root: Path, name: str) -> bool:
 
 
 def create_branch(repo_root: Path, name: str, start: str | None = None) -> None:
-    args = ["branch", name]
+    args = ["branch", END, _ref(name)]
     if start:
-        args.append(start)
+        args.append(_ref(start))
     run_git(repo_root, *args)
 
 
 def checkout(repo_root: Path, name: str) -> None:
-    run_git(repo_root, "checkout", "-q", name)
+    run_git(repo_root, "checkout", "-q", END, _ref(name))
 
 
 def delete_branch(repo_root: Path, name: str, force: bool = False) -> None:
-    run_git(repo_root, "branch", "-D" if force else "-d", name)
+    run_git(repo_root, "branch", "-D" if force else "-d", END, _ref(name))
 
 
 def _remote(repo_root: Path, *args: str) -> str:
@@ -453,7 +463,7 @@ def _remote(repo_root: Path, *args: str) -> str:
 
 
 def fetch(repo_root: Path, remote: str | None = None) -> str:
-    return _remote(repo_root, "fetch", "--prune", *([remote] if remote else []))
+    return _remote(repo_root, "fetch", "--prune", *([END, _ref(remote)] if remote else []))
 
 
 def pull(repo_root: Path) -> str:

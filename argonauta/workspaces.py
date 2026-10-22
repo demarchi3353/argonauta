@@ -1,0 +1,193 @@
+"""User-level registry of workspaces (named groups of repositories).
+
+Stored outside any repository at ~/.config/argonauta/workspaces.json so the
+web UI can switch between repositories. Only paths that resolve to a git
+toplevel are accepted, and the API refers to repositories by id only.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import secrets
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from argonauta import gitops
+from argonauta.config import DATA_DIR_NAME, DB_FILE_NAME
+
+FILE_NAME = "workspaces.json"
+VERSION = 1
+MAX_NAME = 100
+DEFAULT_WORKSPACE = "Default"
+
+
+class RegistryError(ValueError):
+    pass
+
+
+def config_dir() -> Path:
+    raw = os.environ.get("ARGONAUTA_CONFIG_DIR", "").strip()
+    if raw:
+        return Path(raw).expanduser()
+    return Path.home() / ".config" / "argonauta"
+
+
+@dataclass
+class Repo:
+    id: str
+    path: Path
+    name: str
+
+    @property
+    def exists(self) -> bool:
+        return (self.path / ".git").exists()
+
+    @property
+    def initialized(self) -> bool:
+        return (self.path / DATA_DIR_NAME / DB_FILE_NAME).is_file()
+
+    def to_dict(self) -> dict:
+        return {"id": self.id, "path": str(self.path), "name": self.name, "exists": self.exists, "initialized": self.initialized}
+
+
+@dataclass
+class Workspace:
+    id: str
+    name: str
+    repos: list[Repo] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {"id": self.id, "name": self.name, "repos": [r.to_dict() for r in self.repos]}
+
+
+def _clean_name(name: str) -> str:
+    name = " ".join((name or "").split())
+    if not name:
+        raise RegistryError("name must not be empty")
+    if len(name) > MAX_NAME:
+        raise RegistryError(f"name must be at most {MAX_NAME} characters")
+    return name
+
+
+class Registry:
+    def __init__(self, path: Path):
+        self.path = path
+        self.workspaces: list[Workspace] = []
+
+    # ----- persistence -----
+    def load(self) -> None:
+        if not self.path.is_file():
+            self.workspaces = []
+            return
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RegistryError(f"{self.path} is not valid JSON: {exc}") from exc
+        if not isinstance(data, dict) or data.get("version") != VERSION or not isinstance(data.get("workspaces"), list):
+            raise RegistryError(f"{self.path} is not a valid workspaces file")
+        out: list[Workspace] = []
+        for w in data["workspaces"]:
+            if not isinstance(w, dict) or not isinstance(w.get("id"), str) or not isinstance(w.get("name"), str):
+                raise RegistryError(f"{self.path} contains an invalid workspace")
+            repos = []
+            for r in w.get("repos", []):
+                if not isinstance(r, dict) or not all(isinstance(r.get(k), str) for k in ("id", "path", "name")):
+                    raise RegistryError(f"{self.path} contains an invalid repository entry")
+                repos.append(Repo(id=r["id"], path=Path(r["path"]), name=r["name"]))
+            out.append(Workspace(id=w["id"], name=w["name"], repos=repos))
+        self.workspaces = out
+
+    def save(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"version": VERSION, "workspaces": [
+            {"id": w.id, "name": w.name, "repos": [{"id": r.id, "path": str(r.path), "name": r.name} for r in w.repos]}
+            for w in self.workspaces
+        ]}
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        os.replace(tmp, self.path)
+
+    def to_dict(self) -> dict:
+        return {"version": VERSION, "workspaces": [w.to_dict() for w in self.workspaces]}
+
+    # ----- lookups -----
+    def get_workspace(self, workspace_id: str) -> Workspace | None:
+        return next((w for w in self.workspaces if w.id == workspace_id), None)
+
+    def get_repo(self, repo_id: str) -> Repo | None:
+        for w in self.workspaces:
+            for r in w.repos:
+                if r.id == repo_id:
+                    return r
+        return None
+
+    def find_repo_by_path(self, path: Path) -> Repo | None:
+        resolved = path.resolve()
+        for w in self.workspaces:
+            for r in w.repos:
+                if r.path == resolved:
+                    return r
+        return None
+
+    # ----- mutations -----
+    def add_workspace(self, name: str) -> Workspace:
+        ws = Workspace(id="w_" + secrets.token_hex(4), name=_clean_name(name))
+        self.workspaces.append(ws)
+        self.save()
+        return ws
+
+    def rename_workspace(self, workspace_id: str, name: str) -> Workspace:
+        ws = self.get_workspace(workspace_id)
+        if ws is None:
+            raise RegistryError(f"no workspace {workspace_id}")
+        ws.name = _clean_name(name)
+        self.save()
+        return ws
+
+    def remove_workspace(self, workspace_id: str) -> None:
+        ws = self.get_workspace(workspace_id)
+        if ws is None:
+            raise RegistryError(f"no workspace {workspace_id}")
+        self.workspaces.remove(ws)
+        self.save()
+
+    def add_repo(self, workspace_id: str, path: Path) -> Repo:
+        ws = self.get_workspace(workspace_id)
+        if ws is None:
+            raise RegistryError(f"no workspace {workspace_id}")
+        try:
+            top = gitops.repo_toplevel(Path(path).expanduser())
+        except gitops.GitError as exc:
+            raise RegistryError(f"{path} is not inside a git repository") from exc
+        if self.find_repo_by_path(top) is not None:
+            raise RegistryError(f"{top} is already registered")
+        repo = Repo(id="r_" + secrets.token_hex(4), path=top, name=top.name)
+        ws.repos.append(repo)
+        self.save()
+        return repo
+
+    def remove_repo(self, repo_id: str) -> None:
+        for w in self.workspaces:
+            for r in w.repos:
+                if r.id == repo_id:
+                    w.repos.remove(r)
+                    self.save()
+                    return
+        raise RegistryError(f"no repository {repo_id}")
+
+    def ensure_repo(self, path: Path) -> Repo:
+        top = gitops.repo_toplevel(Path(path))
+        existing = self.find_repo_by_path(top)
+        if existing is not None:
+            return existing
+        default = next((w for w in self.workspaces if w.name == DEFAULT_WORKSPACE), None)
+        if default is None:
+            default = self.add_workspace(DEFAULT_WORKSPACE)
+        return self.add_repo(default.id, top)
+
+
+def open_registry() -> Registry:
+    registry = Registry(config_dir() / FILE_NAME)
+    registry.load()
+    return registry
