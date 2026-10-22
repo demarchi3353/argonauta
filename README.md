@@ -19,7 +19,7 @@ argonauta export backup.json
 
 ## Setup
 
-Requirements: Python 3.12 or newer, git 2.x, macOS or Linux (Windows via WSL).
+Requirements: Python 3.12 or newer, git 2.24 or newer, macOS or Linux (Windows via WSL).
 
 ```
 scripts/install.sh         # creates .venv, installs argonauta[anthropic,dev], copies .env.example to .env
@@ -75,6 +75,56 @@ Every command has a clear state: an empty state that names the next command,
 a loading spinner or progress bar on a terminal, validation errors (exit code 2),
 success lines prefixed with `✓` (exit 0) and failures prefixed with `✗` (exit 1).
 
+## Web UI
+
+`argonauta ui` starts a local server on 127.0.0.1, prints a one-time URL with a
+token and opens it in your browser. The page has the GitKraken-style layout:
+workspaces and branches on the left, the commit graph in the middle, diffs and
+details on the right, and proposals, events and terminals at the bottom.
+
+What you can do there: stage, unstage and discard files; commit (with amend);
+create, switch and delete local branches; fetch, pull and push; open terminal
+tabs; read the credentials panel; and run the whole assistant loop (initialize,
+index, propose, apply with tests, commit, reject, revert).
+
+Shortcuts: `p` proposal field, `c` commit message, `t` new terminal, `/`
+filter commits, `?` help, `Esc` closes dialogs. Every control is reachable with
+Tab and has a visible focus ring; status is always shown with a symbol, never
+colour alone; the theme follows your OS and both palettes are chosen for AA
+contrast.
+
+Stop the server with Ctrl+C. Nothing runs when it is not running.
+
+## Workspaces
+
+A workspace is a named group of repositories. The list lives in
+`~/.config/argonauta/workspaces.json` (override with `ARGONAUTA_CONFIG_DIR`).
+Each repository keeps its own `.argonauta/` store. Manage them in the page or
+with `argonauta workspace list | add PATH | remove PATH`. Running
+`argonauta ui` inside an unregistered repository adds it to "Default".
+
+## Credentials panel
+
+Shows the git identity (`user.name`, `user.email`) and where it comes from, the
+SSH host alias your remote resolves to, which identity files `ssh -G` would try,
+their type and fingerprint, whether the key is loaded in `ssh-add -l`, the
+commit-signing key (GPG or SSH) with its validity, and the signature status of
+HEAD and of every commit in the graph. It reads `git config`, `ssh -G`,
+`ssh-keygen -l` on `.pub` files, `ssh-add -l` and `gpg --list-keys`. It never
+opens a private key.
+
+## Embedded terminal
+
+A terminal tab is a real login shell started inside the repository with your
+normal environment. It is wired to the page through a WebSocket on the same
+loopback server. This is the most sensitive feature in Argonauta: anyone who
+can reach the server with the token can run commands as you. The protections
+are that the server listens only on 127.0.0.1, every WebSocket must present the
+per-run token as its first message and a matching Origin, shells die when the
+tab or the server closes, and the server only exists while `argonauta ui` runs.
+If you do not want this at all, do not open terminal tabs; nothing is spawned
+until you do.
+
 ## Permissions: what Argonauta touches and what leaves the machine
 
 - **Reads** files that `git ls-files` reports inside the repository, and nothing
@@ -85,6 +135,8 @@ success lines prefixed with `✓` (exit 0) and failures prefixed with `✗` (exi
 - **Runs** the test command you configured, parsed with `shlex` and executed
   without a shell, with a timeout, and with `ANTHROPIC_API_KEY` and
   `ANTHROPIC_AUTH_TOKEN` removed from its environment.
+- **Web UI**: the page talks only to the loopback server that `argonauta ui`
+  started, with a per-run token; it loads no external script, font or image.
 - **Network**: exactly one kind of request, to the Anthropic API, and only when
   a key is present and you run `propose` without `--dry-run` or `--from-diff`.
   The request contains the system prompt, your task text, a short repository
@@ -156,6 +208,8 @@ Data model (one SQLite file per repository):
 - Everything lives in `<repo>/.argonauta/`: `argonauta.db` (SQLite, WAL mode),
   `argonauta.log`, and `prompts/` for manual-mode bundles. Delete the folder to
   remove every trace; the repository itself is untouched.
+- The workspace list for the web UI lives in `~/.config/argonauta/workspaces.json`
+  (paths and names only). Delete it to forget every workspace.
 - `argonauta export backup.json` writes all proposals, changes, test runs,
   events, settings and index metadata (paths and hashes, never file contents) as
   plain JSON. Diffs are included because they are your work.
@@ -198,18 +252,24 @@ the CLI refuses to guess and asks for `--yes` instead of hanging.
 | `scripts/build.sh` | build wheel and sdist into `dist/`, run `pip check` |
 | `scripts/run.sh ...` | production-style run: install the built wheel into `.venv-prod` and run it |
 | `scripts/demo.sh` | run the full loop on a throwaway copy of the sample project |
+| `scripts/dev.sh ui` | start the web UI from source |
 
 ## Tests
 
-`scripts/test.sh` runs 45 tests: store round trips and cascade deletes, diff
+`scripts/test.sh` runs 120 tests: store round trips and cascade deletes, diff
 extraction and path validation (traversal, absolute paths, protected files,
 symlinks), tokenizer and BM25 ranking with incremental re-indexing, reply parsing,
 export/import round trips with rejection of malformed payloads and atomicity,
 the workflow against a temporary git repository (propose, apply, test, commit,
 revert, failed tests blocking commits, dirty-tree refusal, invalid diffs), log
-redaction, and one end-to-end smoke test that drives the installed CLI as a
+redaction, one end-to-end smoke test that drives the installed CLI as a
 subprocess through init, index, propose, apply, show, history, export, import
-and sample load/clear.
+and sample load/clear, plus the web layer: workspace registry, job runner,
+WebSocket framing, pty sessions, credential parsing, graph lanes, the JSON API
+against a live server thread (auth failures, path traversal, staging, commits,
+branches, remote jobs against a bare repository, the assistant loop), a
+WebSocket terminal round trip, and a smoke test that starts `argonauta ui` as a
+subprocess and stops it with Ctrl+C.
 
 ## Limitations (on purpose)
 
@@ -224,9 +284,11 @@ and sample load/clear.
   multi-user history.
 - **Unified diffs only.** Replies without a parseable diff are stored as
   `invalid` with the model's explanation so you can read why.
-- **Not a full Git client.** Branching, rebasing, stashing, remotes and conflict
-  resolution stay with `git` itself; Argonauta covers the change-test-commit
-  loop and its history.
+- **Not a full Git client.** The web UI covers staging, commits, local
+  branches, fetch, pull and push. Merge, rebase, conflict resolution, stash,
+  hunk-level staging, tags and submodules stay with `git` itself.
+- **The web UI is single-user.** It binds to 127.0.0.1 only and must never be
+  exposed beyond localhost; the embedded terminal is a real shell.
 - **No security certification.** Input validation and the protected-path rules
   are tested, but this is a personal tool: review every diff before `apply`.
 
