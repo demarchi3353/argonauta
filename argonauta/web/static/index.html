@@ -9,6 +9,31 @@
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
+<svg hidden aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-repo" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-branch" viewBox="0 0 24 24"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></symbol>
+  <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></symbol>
+  <symbol id="i-fetch" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></symbol>
+  <symbol id="i-pull" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/></symbol>
+  <symbol id="i-push" viewBox="0 0 24 24"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24"><path d="M4 17l6-6-6-6"/><path d="M12 19h8"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M5 3l14 9-14 9V3z"/></symbol>
+  <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></symbol>
+  <symbol id="i-commit" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M1.05 12H7M17.01 12h5.95"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></symbol>
+</svg>
 <a class="skip" href="#graph-panel">Skip to commit graph</a>
 <header class="topbar" role="banner">
   <div class="brand">Argonauta</div>
@@ -17,14 +42,14 @@
   <div class="branch-pill" id="branch-pill" aria-live="polite" title="Current branch"></div>
   <div class="spacer"></div>
   <div class="actions" role="group" aria-label="Remote actions">
-    <button id="btn-fetch" class="btn" type="button">Fetch</button>
-    <button id="btn-pull" class="btn" type="button">Pull</button>
-    <button id="btn-push" class="btn" type="button">Push</button>
+    <button id="btn-fetch" class="btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-fetch"/></svg>Fetch</button>
+    <button id="btn-pull" class="btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-pull"/></svg>Pull</button>
+    <button id="btn-push" class="btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-push"/></svg>Push</button>
   </div>
   <div class="actions" role="group" aria-label="Panels">
-    <button id="btn-terminal" class="btn" type="button">Terminal</button>
-    <button id="btn-credentials" class="btn" type="button">Credentials</button>
-    <button id="btn-help" class="btn ghost" type="button" aria-label="Keyboard shortcuts">?</button>
+    <button id="btn-terminal" class="btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-terminal"/></svg>Terminal</button>
+    <button id="btn-credentials" class="btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-key"/></svg>Credentials</button>
+    <button id="btn-help" class="btn ghost" type="button" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)"><svg class="ic" aria-hidden="true"><use href="#i-help"/></svg></button>
   </div>
 </header>
 
@@ -32,14 +57,14 @@
   <aside class="left" aria-label="Repository sidebar">
     <section class="box" aria-labelledby="h-workspaces">
       <div class="box-head"><h2 id="h-workspaces">Workspaces</h2>
-        <button class="btn mini" id="btn-add-workspace" type="button">+ Workspace</button>
-        <button class="btn mini" id="btn-add-repo" type="button">+ Repo</button></div>
+        <button class="btn mini" id="btn-add-workspace" type="button"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Workspace</button>
+        <button class="btn mini" id="btn-add-repo" type="button"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Repo</button></div>
       <ul id="workspace-list" class="tree" role="tree" aria-label="Workspaces and repositories"></ul>
     </section>
     <section class="box" aria-labelledby="h-branches">
-      <div class="box-head"><h2 id="h-branches">Branches</h2><button class="btn mini" id="btn-new-branch" type="button">+ Branch</button></div>
+      <div class="box-head"><h2 id="h-branches">Branches</h2><button class="btn mini" id="btn-new-branch" type="button"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Branch</button></div>
       <ul id="branch-list" class="list" role="listbox" aria-label="Local branches"></ul>
-      <h3>Remotes</h3>
+      <h3><svg class="ic" aria-hidden="true"><use href="#i-cloud"/></svg>Remotes</h3>
       <ul id="remote-branch-list" class="list" role="listbox" aria-label="Remote branches"></ul>
     </section>
     <section class="box grow" aria-labelledby="h-changes">
@@ -55,7 +80,7 @@
         <textarea id="commit-message" rows="3" maxlength="5000" placeholder="Summary of the change" required></textarea>
         <div class="row">
           <label class="check"><input type="checkbox" id="commit-amend"> Amend</label>
-          <button class="btn primary" id="btn-commit" type="submit">Commit</button>
+          <button class="btn primary" id="btn-commit" type="submit"><svg class="ic" aria-hidden="true"><use href="#i-commit"/></svg>Commit</button>
         </div>
         <div id="commit-error" class="field-error" role="alert"></div>
       </form>
@@ -64,18 +89,19 @@
 
   <section class="center" id="graph-panel" aria-label="Commit graph" tabindex="-1">
     <div class="box-head sticky">
-      <h2>Commits</h2>
+      <h2><svg class="ic" aria-hidden="true"><use href="#i-commit"/></svg>Commits</h2>
       <input id="commit-filter" type="search" placeholder="Filter commits (/)" aria-label="Filter commits">
       <span id="graph-count" class="muted"></span>
     </div>
     <div id="graph-empty" class="empty" hidden>No commits yet. Stage files and commit to start the graph.</div>
+    <div id="no-repo" class="empty" hidden><span id="no-repo-text">No repository selected.</span> <button class="btn mini" id="btn-add-repo-2" type="button"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Add a repository</button></div>
     <div id="graph" class="graph" role="listbox" aria-label="Commits"></div>
   </section>
 
   <section class="right" aria-label="Details">
     <div class="tabs" role="tablist" aria-label="Detail panels">
-      <button class="tab" role="tab" data-tab="detail" aria-selected="true" id="tab-detail">Detail</button>
-      <button class="tab" role="tab" data-tab="credentials" aria-selected="false" id="tab-credentials">Credentials</button>
+      <button class="tab" role="tab" data-tab="detail" aria-selected="true" id="tab-detail"><svg class="ic" aria-hidden="true"><use href="#i-file"/></svg>Detail</button>
+      <button class="tab" role="tab" data-tab="credentials" aria-selected="false" id="tab-credentials"><svg class="ic" aria-hidden="true"><use href="#i-key"/></svg>Credentials</button>
     </div>
     <div id="pane-detail" role="tabpanel" aria-labelledby="tab-detail" class="pane">
       <div class="empty">Select a file, a commit or a proposal to see its diff.</div>
@@ -86,13 +112,13 @@
 
 <section class="bottom" aria-label="Assistant and terminals">
   <div class="tabs" role="tablist" aria-label="Bottom panels" id="bottom-tabs">
-    <button class="tab" role="tab" data-tab="proposals" aria-selected="true">Proposals</button>
-    <button class="tab" role="tab" data-tab="events" aria-selected="false">Events</button>
+    <button class="tab" role="tab" data-tab="proposals" aria-selected="true"><svg class="ic" aria-hidden="true"><use href="#i-file"/></svg>Proposals</button>
+    <button class="tab" role="tab" data-tab="events" aria-selected="false"><svg class="ic" aria-hidden="true"><use href="#i-activity"/></svg>Events</button>
   </div>
   <div id="pane-proposals" role="tabpanel" class="pane">
     <div id="store-missing" class="empty" hidden>
       This repository has no Argonauta store yet.
-      <button class="btn primary" id="btn-init" type="button">Initialize</button>
+      <button class="btn primary" id="btn-init" type="button"><svg class="ic" aria-hidden="true"><use href="#i-zap"/></svg>Initialize</button>
     </div>
     <div id="assistant" hidden>
       <form id="propose-form" class="propose-form">
@@ -100,19 +126,19 @@
         <div class="row">
           <input id="task" type="text" maxlength="4000" placeholder="e.g. Make power() handle negative exponents" required>
           <label class="check"><input type="checkbox" id="dry-run"> Dry run</label>
-          <button class="btn primary" id="btn-propose" type="submit">Propose</button>
-          <button class="btn" id="btn-index" type="button">Index</button>
-          <button class="btn" id="btn-test" type="button">Run tests</button>
+          <button class="btn primary" id="btn-propose" type="submit"><svg class="ic" aria-hidden="true"><use href="#i-zap"/></svg>Propose</button>
+          <button class="btn" id="btn-index" type="button"><svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg>Index</button>
+          <button class="btn" id="btn-test" type="button"><svg class="ic" aria-hidden="true"><use href="#i-play"/></svg>Run tests</button>
         </div>
         <div class="muted" id="provider-line"></div>
         <div id="propose-error" class="field-error" role="alert"></div>
       </form>
-      <div id="proposals-empty" class="empty" hidden>No proposals yet. Describe a change above.</div>
       <table id="proposals-table" class="table" hidden>
         <thead><tr><th scope="col">#</th><th scope="col">Status</th><th scope="col">Tests</th><th scope="col">Commit</th><th scope="col">Task</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
+    <div id="proposals-empty" class="empty" hidden>No proposals yet. Describe a change above.</div>
   </div>
   <div id="pane-events" role="tabpanel" class="pane" hidden><table class="table" id="events-table"><thead><tr><th scope="col">Time</th><th scope="col">Kind</th><th scope="col">Message</th></tr></thead><tbody></tbody></table></div>
   <div id="terminal-panes"></div>

@@ -121,3 +121,10 @@ h3 { font-size: 12px; margin: 10px 0 4px; color: var(--muted); display: flex; al
   .layout { grid-template-columns: 1fr; grid-auto-rows: minmax(240px, auto); overflow: auto; }
   .left, .center, .right { border-right: 0; border-bottom: 1px solid var(--line); }
 }
+
+/* icons: inline SVG symbols, stroke-based, inherit the text colour */
+.ic { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vertical-align: -2px; margin-right: 5px; flex: none; }
+.btn.mini .ic, .tree .ic, .list .ic, h2 .ic, h3 .ic { width: 12px; height: 12px; margin-right: 4px; }
+.btn.ghost .ic { margin-right: 0; width: 16px; height: 16px; }
+.tab .ic { opacity: .8; }
+.btn:disabled { cursor: not-allowed; }
