@@ -194,8 +194,82 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._send_json(500, {"error": f"internal error: {exc.__class__.__name__}"})
 
     def _handle_websocket(self, path: str) -> None:
-        # Filled in by Task 9.
-        self._send_json(404, {"error": "not found"})
+        import re
+
+        from argonauta.web import websocket as wsproto
+
+        m = re.match(r"^/ws/terminals/([A-Za-z0-9_]{3,40})$", path)
+        if not self._origin_ok():
+            self._send_json(403, {"error": "forbidden origin"})
+            return
+        if m is None or self.headers.get("Upgrade", "").lower() != "websocket" or not self.headers.get("Sec-WebSocket-Key"):
+            self._send_json(404, {"error": "not found"})
+            return
+        session = self.ctx.terminals.get(m.group(1))
+        if session is None:
+            self._send_json(404, {"error": "terminal not found"})
+            return
+        self.send_response(101, "Switching Protocols")
+        self.send_header("Upgrade", "websocket")
+        self.send_header("Connection", "Upgrade")
+        self.send_header("Sec-WebSocket-Accept", wsproto.accept_key(self.headers["Sec-WebSocket-Key"]))
+        self.end_headers()
+        self.close_connection = True
+        conn = wsproto.WebSocketConnection(self.rfile, self.wfile)
+        try:
+            first = conn.recv()
+            try:
+                auth = json.loads(first.payload.decode("utf-8")) if first.opcode == wsproto.OP_TEXT else {}
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                auth = {}
+            if auth.get("type") != "auth" or not isinstance(auth.get("token"), str) or not self._token_ok(auth["token"]):
+                conn.close(1008)
+                return
+            session.resize(int(auth.get("cols") or session.cols), int(auth.get("rows") or session.rows))
+        except (wsproto.ConnectionClosed, wsproto.ProtocolError, ValueError):
+            conn.close(1002)
+            return
+
+        stop = threading.Event()
+
+        def pump() -> None:
+            try:
+                while not stop.is_set():
+                    data = session.read(0.1)
+                    if data is None:
+                        continue
+                    if data == b"":
+                        break
+                    conn.send_binary(data)
+            except wsproto.ConnectionClosed:
+                pass
+            finally:
+                stop.set()
+                try:
+                    conn.close(1000)
+                except Exception:  # noqa: BLE001
+                    pass
+
+        reader = threading.Thread(target=pump, name=f"pty-{session.id}", daemon=True)
+        reader.start()
+        try:
+            while not stop.is_set():
+                frame = conn.recv()
+                if frame.opcode == wsproto.OP_BINARY:
+                    session.write(frame.payload)
+                elif frame.opcode == wsproto.OP_TEXT:
+                    try:
+                        msg = json.loads(frame.payload.decode("utf-8"))
+                    except (UnicodeDecodeError, json.JSONDecodeError):
+                        continue
+                    if msg.get("type") == "resize":
+                        session.resize(int(msg.get("cols") or session.cols), int(msg.get("rows") or session.rows))
+        except (wsproto.ConnectionClosed, wsproto.ProtocolError, ValueError, OSError):
+            pass
+        finally:
+            stop.set()
+            self.ctx.terminals.remove(session.id)
+            reader.join(1)
 
     def do_GET(self) -> None:  # noqa: N802
         self._handle("GET")

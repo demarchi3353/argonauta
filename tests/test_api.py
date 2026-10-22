@@ -272,3 +272,71 @@ def test_second_job_for_same_repo_is_409(api, tmp_path):
     gate.set()
     assert first[0] == 202 and second[0] == 409 and second[1]["job"]["id"] == first[1]["job"]["id"]
     api.wait_job(first[1]["job"]["id"])
+
+
+# ----- assistant, credentials, terminals (Task 9) -------------------------------
+def test_assistant_loop_over_api(api):
+    repo = api.repo
+    r = f"/api/repos/{repo.id}"
+    assert api.get(f"{r}/proposals")[0] == 409  # not initialised
+    import sys
+    status, data = api.post(f"{r}/init", {"test_command": f"{sys.executable} -m pytest -q"})
+    assert status == 201 and data["initialized"] is True
+    assert api.get(f"{r}/settings")[1]["test_command"].endswith("pytest -q")
+    assert api.request("PUT", f"{r}/settings", {"test_command": ""})[0] == 400
+
+    status, data = api.post(f"{r}/jobs/index")
+    assert status == 202 and api.wait_job(data["job"]["id"])["result"]["file_count"] >= 4
+
+    status, data = api.post(f"{r}/jobs/propose", {"task": "Make power() handle negative exponents", "dry_run": True})
+    job = api.wait_job(data["job"]["id"])
+    assert job["status"] == "done" and "calc/core.py" in job["result"]["context"]
+
+    assert api.post(f"{r}/jobs/propose", {"task": "   "})[0] == 400
+    status, data = api.post(f"{r}/jobs/propose", {"task": "Make power() handle negative exponents"})
+    job = api.wait_job(data["job"]["id"])
+    assert job["status"] == "done" and job["result"]["proposal"]["status"] == "proposed"
+    pid = job["result"]["proposal"]["id"]
+    assert api.get(f"{r}/proposals/{pid}")[1]["proposal"]["id"] == pid
+    assert len(api.get(f"{r}/proposals")[1]["proposals"]) == 1
+
+    status, data = api.post(f"{r}/jobs/apply", {"proposal_id": pid, "test": True, "commit": True})
+    job = api.wait_job(data["job"]["id"], timeout=180)
+    assert job["status"] == "done", job
+    assert job["result"]["test_run"]["status"] == "passed" and job["result"]["commit_sha"]
+    assert api.get(f"{r}/proposals/{pid}")[1]["proposal"]["status"] == "applied"
+    assert api.post(f"{r}/proposals/{pid}/revert")[0] == 200
+    assert api.get(f"{r}/proposals/{pid}")[1]["proposal"]["status"] == "reverted"
+    kinds = [e["kind"] for e in api.get(f"{r}/events")[1]["events"]]
+    assert "propose" in kinds and "revert" in kinds
+    assert api.post(f"{r}/proposals/999/reject")[0] == 404
+    status, data = api.post(f"{r}/jobs/test")
+    assert status == 202 and api.wait_job(data["job"]["id"], timeout=180)["result"]["test_run"]["status"] == "failed"
+
+
+def test_propose_in_manual_mode_reports_bundle(api, monkeypatch):
+    monkeypatch.setenv("ARGONAUTA_PROVIDER", "manual")
+    repo = api.repo
+    r = f"/api/repos/{repo.id}"
+    api.post(f"{r}/init")
+    api.wait_job(api.post(f"{r}/jobs/index")[1]["job"]["id"])
+    job = api.wait_job(api.post(f"{r}/jobs/propose", {"task": "anything"})[1]["job"]["id"])
+    assert job["status"] == "done" and job["result"]["manual"] is True and "prompt bundle" in job["result"]["message"]
+
+
+def test_credentials_endpoint(api):
+    status, data = api.get(f"/api/repos/{api.repo.id}/credentials")
+    assert status == 200 and set(data) == {"identity", "ssh", "signing", "head"}
+    assert data["ssh"]["kind"] in ("none", "ssh", "https", "local")
+
+
+def test_terminal_create_list_delete(api):
+    r = f"/api/repos/{api.repo.id}"
+    assert api.post(f"{r}/terminals", {"cols": "x"})[0] == 400
+    status, data = api.post(f"{r}/terminals", {"cols": 80, "rows": 24})
+    assert status == 201 and data["terminal"]["alive"] is True
+    tid = data["terminal"]["id"]
+    assert [t["id"] for t in api.get(f"{r}/terminals")[1]["terminals"]] == [tid]
+    assert api.request("DELETE", f"/api/terminals/{tid}")[0] == 200
+    assert api.get(f"{r}/terminals")[1]["terminals"] == []
+    assert api.request("DELETE", f"/api/terminals/{tid}")[0] == 404
