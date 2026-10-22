@@ -32,6 +32,9 @@ STATIC_FILES = {
     "/vendor/xterm.js": ("vendor/xterm.js", "text/javascript; charset=utf-8"),
     "/vendor/xterm.css": ("vendor/xterm.css", "text/css; charset=utf-8"),
     "/vendor/addon-fit.js": ("vendor/addon-fit.js", "text/javascript; charset=utf-8"),
+    "/logo.png": ("logo.png", "image/png"),
+    "/favicon.png": ("favicon.png", "image/png"),
+    "/favicon.ico": ("favicon.png", "image/png"),
 }
 CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; frame-ancestors 'none'"
 

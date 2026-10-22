@@ -30,4 +30,4 @@ testpaths = ["tests"]
 addopts = "-q"
 
 [tool.setuptools.package-data]
-argonauta = ["web/static/*.html", "web/static/*.js", "web/static/*.css", "web/static/vendor/*"]
+argonauta = ["web/static/*.html", "web/static/*.js", "web/static/*.css", "web/static/*.png", "web/static/vendor/*"]

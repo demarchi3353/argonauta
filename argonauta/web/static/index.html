@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>Argonauta</title>
+<link rel="icon" type="image/png" href="/favicon.png">
 <link rel="stylesheet" href="/vendor/xterm.css">
 <link rel="stylesheet" href="/app.css">
 </head>
@@ -36,7 +37,7 @@
 </svg>
 <a class="skip" href="#graph-panel">Skip to commit graph</a>
 <header class="topbar" role="banner">
-  <div class="brand">Argonauta</div>
+  <div class="brand"><img class="logo" src="/logo.png" alt="" width="28" height="28">Argonauta</div>
   <label class="field"><span>Workspace</span><select id="workspace-select" aria-label="Workspace"></select></label>
   <label class="field"><span>Repository</span><select id="repo-select" aria-label="Repository"></select></label>
   <div class="branch-pill" id="branch-pill" aria-live="polite" title="Current branch"></div>
@@ -94,7 +95,7 @@
       <span id="graph-count" class="muted"></span>
     </div>
     <div id="graph-empty" class="empty" hidden>No commits yet. Stage files and commit to start the graph.</div>
-    <div id="no-repo" class="empty" hidden><span id="no-repo-text">No repository selected.</span> <button class="btn mini" id="btn-add-repo-2" type="button"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Add a repository</button></div>
+    <div id="no-repo" class="empty hero" hidden><img class="logo-hero" src="/logo.png" alt="" width="96" height="96"><span id="no-repo-text">No repository selected.</span> <button class="btn mini" id="btn-add-repo-2" type="button"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Add a repository</button></div>
     <div id="graph" class="graph" role="listbox" aria-label="Commits"></div>
   </section>
 
@@ -159,6 +160,7 @@
 </dialog>
 <dialog id="help" class="dialog">
   <form method="dialog">
+    <div class="about"><img class="logo-hero" src="/logo.png" alt="" width="72" height="72"><div><strong>Argonauta</strong><br><span class="muted">repository-local Git client with an assistant</span></div></div>
     <h2>Keyboard shortcuts</h2>
     <dl class="shortcuts">
       <dt>p</dt><dd>Focus the proposal task field</dd>

@@ -95,6 +95,9 @@ def test_index_and_static_served_without_token(api):
     assert api.get("/app.js", token=None, origin=None, raw=True)[0] == 200
     assert api.get("/app.css", token=None, origin=None, raw=True)[0] == 200
     assert api.get("/vendor/xterm.js", token=None, origin=None, raw=True)[0] == 200
+    status, body, headers = api.get("/logo.png", token=None, origin=None, raw=True)
+    assert status == 200 and headers.get("Content-Type") == "image/png" and body[:8] == b"\x89PNG\r\n\x1a\n"
+    assert api.get("/favicon.ico", token=None, origin=None, raw=True)[0] == 200
     assert api.get("/../pyproject.toml", token=None, origin=None, raw=True)[0] == 404
     assert api.get("/static/../../pyproject.toml", token=None, origin=None, raw=True)[0] == 404
 
