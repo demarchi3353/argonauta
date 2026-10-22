@@ -71,11 +71,12 @@ settings live.
 | `ARGONAUTA_CLAUDE_BIN` | unset | Path to the `claude` binary when it is not on PATH. Shell only. |
 | `ARGONAUTA_LOCAL_URL` | `http://127.0.0.1:11434/v1` | Base URL of the OpenAI-compatible API. Loopback only unless allowed. Shell only. |
 | `ARGONAUTA_LOCAL_ALLOW_REMOTE` | unset | Set to `1` to allow a non-loopback `ARGONAUTA_LOCAL_URL`. Shell only. |
+| `ARGONAUTA_TEST_COMMAND` | unset | Overrides the test command saved by `init`. Shell only. |
+| `ARGONAUTA_CONFIG_DIR` | `~/.config/argonauta` | Where the workspace registry lives. Shell only. |
+| `ARGONAUTA_SCRIPTED_DIFF` | unset | Reply file read by the test-only `scripted` provider. Shell only. |
 
 The local-model values can also be set in the web UI ("Model" button); those
 live in `~/.config/argonauta/settings.json` and shell variables override them.
-| `ARGONAUTA_TEST_COMMAND` | unset | Overrides the test command saved by `init`. Shell only. |
-| `ARGONAUTA_CONFIG_DIR` | `~/.config/argonauta` | Where the workspace registry lives. Shell only. |
 
 ## Web UI
 
