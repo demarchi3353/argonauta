@@ -26,6 +26,8 @@ def test_list_branches_marks_current_and_upstream(repo, tmp_path):
     assert names["feature"].remote is None and not names["feature"].is_current
     remote = [b for b in branches if b.remote == "origin"]
     assert remote and remote[0].name.startswith("origin/")
+    git(repo, "remote", "set-head", "origin", "-a")
+    assert all(b.name != "origin" for b in gitops.list_branches(repo))  # origin/HEAD is not a branch
     assert gitops.list_remotes(repo) == [gitops.RemoteInfo(name="origin", url=str(bare))]
 
 

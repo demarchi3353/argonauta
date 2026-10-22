@@ -235,7 +235,7 @@ def list_branches(repo_root: Path) -> list[BranchInfo]:
         if len(parts) != 7:
             continue
         refname, short, head, upstream, sha, subject, track = parts
-        if short.endswith("/HEAD"):
+        if refname.endswith("/HEAD"):  # refs/remotes/origin/HEAD shortens to just "origin"
             continue
         remote = None
         if refname.startswith("refs/remotes/"):

@@ -98,8 +98,14 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _host_ok(self) -> bool:
         return self.headers.get("Host", "") in self.ctx.allowed_hosts()
 
-    def _origin_ok(self) -> bool:
-        return self.headers.get("Origin", "") in self.ctx.allowed_origins()
+    def _origin_ok(self, require: bool = False) -> bool:
+        """Reject a foreign Origin. Same-origin fetch() GETs send none, so an
+        absent header is allowed for the API (cross-site browser requests
+        always carry one); WebSocket upgrades must present it."""
+        origin = self.headers.get("Origin")
+        if origin is None:
+            return not require
+        return origin in self.ctx.allowed_origins()
 
     def _token_ok(self, token: str | None = None) -> bool:
         if token is None:
@@ -199,7 +205,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         from argonauta.web import websocket as wsproto
 
         m = re.match(r"^/ws/terminals/([A-Za-z0-9_]{3,40})$", path)
-        if not self._origin_ok():
+        if not self._origin_ok(require=True):
             self._send_json(403, {"error": "forbidden origin"})
             return
         if m is None or self.headers.get("Upgrade", "").lower() != "websocket" or not self.headers.get("Sec-WebSocket-Key"):

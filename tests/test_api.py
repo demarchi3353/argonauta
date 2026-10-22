@@ -92,7 +92,9 @@ def test_index_and_static_served_without_token(api):
     status, body, headers = api.get("/", token=None, origin=None, raw=True)
     assert status == 200 and b"<!doctype html" in body.lower()
     assert "no-store" in headers.get("Cache-Control", "")
-    assert api.get("/app.js", token=None, origin=None, raw=True)[0] in (200, 404)  # exists after Task 11
+    assert api.get("/app.js", token=None, origin=None, raw=True)[0] == 200
+    assert api.get("/app.css", token=None, origin=None, raw=True)[0] == 200
+    assert api.get("/vendor/xterm.js", token=None, origin=None, raw=True)[0] == 200
     assert api.get("/../pyproject.toml", token=None, origin=None, raw=True)[0] == 404
     assert api.get("/static/../../pyproject.toml", token=None, origin=None, raw=True)[0] == 404
 
@@ -101,7 +103,9 @@ def test_api_requires_token_origin_and_host(api):
     assert api.get("/api/workspaces")[0] == 200
     assert api.get("/api/workspaces", token=None)[0] == 401
     assert api.get("/api/workspaces", token="wrong")[0] == 401
-    assert api.get("/api/workspaces", origin=None)[0] == 403
+    # Same-origin fetch() GETs carry no Origin header; cross-site requests always do.
+    assert api.get("/api/workspaces", origin=None)[0] == 200
+    assert api.get("/api/workspaces", origin="http://evil.example")[0] == 403
     assert api.get("/api/workspaces", host="evil.example")[0] == 403
 
 
