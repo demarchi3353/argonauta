@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "argonauta"
+version = "0.1.0"
+description = "Repository-local Git client assistant: index one codebase, ask one model for a diff, run the tests, record every change."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "GPL-3.0-or-later"
+dependencies = [
+  "typer>=0.12,<1",
+  "rich>=13",
+  "python-dotenv>=1.0,<2",
+]
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=1.0,<3"]
+dev = ["pytest>=8", "build>=1.2"]
+
+[project.scripts]
+argonauta = "argonauta.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["argonauta*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
