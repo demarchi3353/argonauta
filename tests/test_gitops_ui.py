@@ -117,3 +117,17 @@ def test_remote_ops_do_not_prompt(repo, monkeypatch):
     monkeypatch.setenv("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=2")
     with pytest.raises(gitops.GitError):
         gitops.fetch(repo)
+
+
+@pytest.mark.parametrize("call", [
+    lambda r: gitops.checkout(r, "--help"),
+    lambda r: gitops.commit_detail(r, "--output=/tmp/argonauta-smuggled"),
+    lambda r: gitops.signature_status(r, "--output=/tmp/argonauta-smuggled"),
+    lambda r: gitops.delete_branch(r, "--all"),
+    lambda r: gitops.create_branch(r, "ok", "--help"),
+    lambda r: gitops.fetch(r, "--help"),
+])
+def test_refs_starting_with_dash_are_not_treated_as_flags(repo, call):
+    with pytest.raises(gitops.GitError):
+        call(repo)
+    assert not Path("/tmp/argonauta-smuggled").exists()
