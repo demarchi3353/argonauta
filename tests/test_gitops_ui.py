@@ -1,0 +1,119 @@
+import os
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from argonauta import gitops
+from tests.conftest import GIT_ENV, git
+
+
+@pytest.fixture
+def repo(sample_repo: Path) -> Path:
+    return sample_repo
+
+
+def test_list_branches_marks_current_and_upstream(repo, tmp_path):
+    git(repo, "branch", "feature")
+    bare = tmp_path / "remote.git"
+    git(repo, "init", "--bare", "-q", str(bare))
+    git(repo, "remote", "add", "origin", str(bare))
+    git(repo, "push", "-q", "-u", "origin", "HEAD")
+    branches = gitops.list_branches(repo)
+    names = {b.name: b for b in branches}
+    current = [b for b in branches if b.is_current]
+    assert len(current) == 1 and current[0].upstream == f"origin/{current[0].name}"
+    assert names["feature"].remote is None and not names["feature"].is_current
+    remote = [b for b in branches if b.remote == "origin"]
+    assert remote and remote[0].name.startswith("origin/")
+    assert gitops.list_remotes(repo) == [gitops.RemoteInfo(name="origin", url=str(bare))]
+
+
+def test_status_detail_splits_areas(repo):
+    (repo / "calc" / "core.py").write_text("changed\n")
+    (repo / "new.txt").write_text("hi\n")
+    (repo / "README.md").write_text("staged\n")
+    git(repo, "add", "README.md")
+    entries = {e.path: e for e in gitops.status_detail(repo)}
+    assert entries["calc/core.py"].worktree == "M" and entries["calc/core.py"].index == " "
+    assert entries["README.md"].index == "M" and entries["README.md"].worktree == " "
+    assert entries["new.txt"].untracked and not entries["new.txt"].conflicted
+
+
+def test_graph_log_has_parents_refs_and_signature_code(repo):
+    git(repo, "checkout", "-q", "-b", "feature")
+    (repo / "f.txt").write_text("f\n")
+    git(repo, "add", "f.txt")
+    git(repo, "commit", "-q", "-m", "feature commit")
+    commits = gitops.graph_log(repo)
+    assert commits[0].subject == "feature commit"
+    assert commits[0].parents == [commits[1].sha]
+    assert any("feature" in r for r in commits[0].refs)
+    assert commits[0].signature in ("N", "G", "B", "U", "X", "Y", "R", "E")
+    assert commits[-1].parents == []
+
+
+def test_commit_detail_lists_files_and_diff(repo):
+    (repo / "calc" / "core.py").write_text("changed\n")
+    git(repo, "commit", "-q", "-am", "edit core")
+    sha = git(repo, "rev-parse", "HEAD").strip()
+    detail = gitops.commit_detail(repo, sha)
+    assert detail.commit.sha == sha and detail.commit.subject == "edit core"
+    assert [f.path for f in detail.files] == ["calc/core.py"]
+    assert detail.files[0].deletions > 0 and "diff --git a/calc/core.py" in detail.diff
+
+
+def test_diff_file_for_untracked_and_index(repo):
+    (repo / "new.txt").write_text("hello\n")
+    assert "+hello" in gitops.diff_file(repo, "new.txt", "worktree")
+    (repo / "README.md").write_text("staged\n")
+    git(repo, "add", "README.md")
+    assert "+staged" in gitops.diff_file(repo, "README.md", "index")
+    assert gitops.diff_file(repo, "README.md", "worktree") == ""
+
+
+def test_stage_unstage_discard_and_commit(repo):
+    (repo / "README.md").write_text("x\n")
+    (repo / "junk.txt").write_text("junk\n")
+    gitops.stage(repo, ["README.md"])
+    assert {e.path: e.index for e in gitops.status_detail(repo)}["README.md"] == "M"
+    gitops.unstage(repo, ["README.md"])
+    assert {e.path: e.worktree for e in gitops.status_detail(repo)}["README.md"] == "M"
+    gitops.discard(repo, ["README.md", "junk.txt"])
+    assert gitops.status_detail(repo) == []
+    (repo / "README.md").write_text("y\n")
+    gitops.stage(repo, ["README.md"])
+    sha = gitops.commit_message(repo, "manual commit")
+    assert git(repo, "log", "-1", "--format=%s").strip() == "manual commit" and len(sha) == 40
+
+
+def test_branch_lifecycle_and_name_validation(repo):
+    assert gitops.valid_branch_name(repo, "feat/ok")
+    assert not gitops.valid_branch_name(repo, "bad name")
+    assert not gitops.valid_branch_name(repo, "a..b")
+    gitops.create_branch(repo, "feat/ok")
+    gitops.checkout(repo, "feat/ok")
+    assert gitops.current_branch(repo) == "feat/ok"
+    with pytest.raises(gitops.GitError):
+        gitops.delete_branch(repo, "feat/ok")  # current branch
+    gitops.checkout(repo, "main" if "main" in git(repo, "branch").split() else "master")
+    gitops.delete_branch(repo, "feat/ok")
+    assert "feat/ok" not in [b.name for b in gitops.list_branches(repo)]
+
+
+def test_fetch_pull_push_with_local_bare_remote(repo, tmp_path):
+    bare = tmp_path / "remote.git"
+    git(repo, "init", "--bare", "-q", str(bare))
+    git(repo, "remote", "add", "origin", str(bare))
+    out = gitops.push(repo, set_upstream=True)
+    assert "origin" in out or out == ""
+    assert gitops.fetch(repo) is not None
+    assert gitops.pull(repo) is not None
+    assert gitops.ahead_behind(repo) == (0, 0)
+
+
+def test_remote_ops_do_not_prompt(repo, monkeypatch):
+    git(repo, "remote", "add", "origin", "ssh://git@127.0.0.1:9/none.git")
+    monkeypatch.setenv("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=2")
+    with pytest.raises(gitops.GitError):
+        gitops.fetch(repo)
