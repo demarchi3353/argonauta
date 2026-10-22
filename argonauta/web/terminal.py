@@ -124,42 +124,62 @@ class TerminalSession:
             return False
         return True
 
-    def kill(self) -> None:
-        """Hang up the terminal, then reap the shell.
+    def _signal(self, sig: int) -> bool:
+        """Signal the shell's whole process group; False once it is gone."""
+        try:
+            os.killpg(self.pid, sig)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            try:
+                os.kill(self.pid, sig)
+                return True
+            except ProcessLookupError:
+                return False
 
-        Closing the pty master is what ends the shell: on macOS a process
-        signalled while its controlling terminal is still open can sit in the
-        exiting state indefinitely, so the master is closed first and SIGKILL
-        is only a last resort.
+    def _reap(self, timeout: float) -> bool:
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                pid, _ = os.waitpid(self.pid, os.WNOHANG)
+            except ChildProcessError:
+                return True
+            if pid:
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.02)
+
+    def kill(self) -> None:
+        """Hang up the terminal and end the shell without ever blocking.
+
+        Closing the pty master is what normally ends the shell. macOS can keep
+        a signalled session leader in the exiting state for a long time (it
+        was observed with zsh killed during start-up), so the wait is bounded
+        and the session is marked dead even if the kernel has not reaped it.
         """
         with self._lock:
             if self._closed:
                 return
             self._closed = True
+            self._exited = True
             try:
                 os.close(self.fd)
             except OSError:
                 pass
-            deadline = time.monotonic() + 2.0
-            reaped = False
-            while time.monotonic() < deadline:
-                try:
-                    pid, _ = os.waitpid(self.pid, os.WNOHANG)
-                except ChildProcessError:
-                    reaped = True
+            reaped = self._reap(0.3)
+            for sig, wait in ((signal.SIGHUP, 0.5), (signal.SIGTERM, 0.5), (signal.SIGKILL, 1.0)):
+                if reaped:
                     break
-                if pid:
-                    reaped = True
+                if not self._signal(sig):
+                    reaped = self._reap(0.1)
                     break
-                time.sleep(0.02)
-            if not reaped:
-                try:
-                    os.kill(self.pid, signal.SIGKILL)
-                    os.waitpid(self.pid, 0)
-                except (ProcessLookupError, ChildProcessError):
-                    pass
-            self._exited = True
-        log.info("terminal %s closed", self.id)
+                reaped = self._reap(wait)
+        if reaped:
+            log.info("terminal %s closed", self.id)
+        else:
+            log.warning("terminal %s shell pid=%s did not exit in time; left for the OS", self.id, self.pid)
 
     def to_dict(self) -> dict:
         return {"id": self.id, "repo_root": str(self.repo_root), "started_at": self.started_at, "alive": self.alive(), "cols": self.cols, "rows": self.rows}
