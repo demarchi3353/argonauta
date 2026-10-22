@@ -155,3 +155,16 @@ def test_discard_drops_staged_changes_and_added_files(repo):
 def test_run_git_in_a_file_path_is_a_git_error(repo):
     with pytest.raises(gitops.GitError, match="cannot run git"):
         gitops.repo_toplevel(repo / "README.md")
+
+
+def test_apply_accepts_diffs_with_wrong_hunk_counts(repo):
+    # Small local models often miscount hunk headers; the body is what matters.
+    (repo / "note.txt").write_text("one\ntwo\nthree\n")
+    git(repo, "add", "note.txt")
+    git(repo, "commit", "-q", "-m", "note")
+    miscounted = "diff --git a/note.txt b/note.txt\n--- a/note.txt\n+++ b/note.txt\n@@ -1,9 +1,2 @@\n one\n-two\n+TWO\n three\n"
+    assert gitops.apply_check(repo, miscounted) is None
+    gitops.apply_diff(repo, miscounted)
+    assert (repo / "note.txt").read_text() == "one\nTWO\nthree\n"
+    gitops.apply_diff(repo, miscounted, reverse=True)
+    assert (repo / "note.txt").read_text() == "one\ntwo\nthree\n"

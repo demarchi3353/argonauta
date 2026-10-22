@@ -110,7 +110,9 @@ def ls_files(repo_root: Path) -> list[str]:
 
 def apply_check(repo_root: Path, diff_text: str, reverse: bool = False) -> str | None:
     """Return None when the diff applies cleanly, else git's explanation."""
-    args = ["apply", "--check", "--whitespace=nowarn"]
+    # --recount: trust the hunk bodies, not the line counts in the headers,
+    # which small local models frequently get wrong.
+    args = ["apply", "--check", "--recount", "--whitespace=nowarn"]
     if reverse:
         args.append("-R")
     proc = run_git(repo_root, *args, "-", check=False, input_text=diff_text)
@@ -120,7 +122,7 @@ def apply_check(repo_root: Path, diff_text: str, reverse: bool = False) -> str |
 
 
 def apply_diff(repo_root: Path, diff_text: str, reverse: bool = False) -> None:
-    args = ["apply", "--whitespace=nowarn"]
+    args = ["apply", "--recount", "--whitespace=nowarn"]
     if reverse:
         args.append("-R")
     args.append("-")
