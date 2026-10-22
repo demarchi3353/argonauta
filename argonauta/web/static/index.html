@@ -1,3 +1,153 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Argonauta</title></head>
-<body><main><h1>Argonauta</h1><p>UI loading…</p></main></body></html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Argonauta</title>
+<link rel="stylesheet" href="/vendor/xterm.css">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<a class="skip" href="#graph-panel">Skip to commit graph</a>
+<header class="topbar" role="banner">
+  <div class="brand">Argonauta</div>
+  <label class="field"><span>Workspace</span><select id="workspace-select" aria-label="Workspace"></select></label>
+  <label class="field"><span>Repository</span><select id="repo-select" aria-label="Repository"></select></label>
+  <div class="branch-pill" id="branch-pill" aria-live="polite" title="Current branch"></div>
+  <div class="spacer"></div>
+  <div class="actions" role="group" aria-label="Remote actions">
+    <button id="btn-fetch" class="btn" type="button">Fetch</button>
+    <button id="btn-pull" class="btn" type="button">Pull</button>
+    <button id="btn-push" class="btn" type="button">Push</button>
+  </div>
+  <div class="actions" role="group" aria-label="Panels">
+    <button id="btn-terminal" class="btn" type="button">Terminal</button>
+    <button id="btn-credentials" class="btn" type="button">Credentials</button>
+    <button id="btn-help" class="btn ghost" type="button" aria-label="Keyboard shortcuts">?</button>
+  </div>
+</header>
+
+<main class="layout">
+  <aside class="left" aria-label="Repository sidebar">
+    <section class="box" aria-labelledby="h-workspaces">
+      <div class="box-head"><h2 id="h-workspaces">Workspaces</h2>
+        <button class="btn mini" id="btn-add-workspace" type="button">+ Workspace</button>
+        <button class="btn mini" id="btn-add-repo" type="button">+ Repo</button></div>
+      <ul id="workspace-list" class="tree" role="tree" aria-label="Workspaces and repositories"></ul>
+    </section>
+    <section class="box" aria-labelledby="h-branches">
+      <div class="box-head"><h2 id="h-branches">Branches</h2><button class="btn mini" id="btn-new-branch" type="button">+ Branch</button></div>
+      <ul id="branch-list" class="list" role="listbox" aria-label="Local branches"></ul>
+      <h3>Remotes</h3>
+      <ul id="remote-branch-list" class="list" role="listbox" aria-label="Remote branches"></ul>
+    </section>
+    <section class="box grow" aria-labelledby="h-changes">
+      <div class="box-head"><h2 id="h-changes">Changes</h2><span id="changes-count" class="muted"></span></div>
+      <div id="changes-empty" class="empty" hidden>Working tree is clean.</div>
+      <div id="conflicts" class="warn" hidden></div>
+      <h3>Staged <button class="btn mini" id="btn-unstage-all" type="button">Unstage all</button></h3>
+      <ul id="staged-list" class="files" aria-label="Staged files"></ul>
+      <h3>Unstaged <button class="btn mini" id="btn-stage-all" type="button">Stage all</button></h3>
+      <ul id="unstaged-list" class="files" aria-label="Unstaged and untracked files"></ul>
+      <form id="commit-form" class="commit-form">
+        <label for="commit-message">Commit message</label>
+        <textarea id="commit-message" rows="3" maxlength="5000" placeholder="Summary of the change" required></textarea>
+        <div class="row">
+          <label class="check"><input type="checkbox" id="commit-amend"> Amend</label>
+          <button class="btn primary" id="btn-commit" type="submit">Commit</button>
+        </div>
+        <div id="commit-error" class="field-error" role="alert"></div>
+      </form>
+    </section>
+  </aside>
+
+  <section class="center" id="graph-panel" aria-label="Commit graph" tabindex="-1">
+    <div class="box-head sticky">
+      <h2>Commits</h2>
+      <input id="commit-filter" type="search" placeholder="Filter commits (/)" aria-label="Filter commits">
+      <span id="graph-count" class="muted"></span>
+    </div>
+    <div id="graph-empty" class="empty" hidden>No commits yet. Stage files and commit to start the graph.</div>
+    <div id="graph" class="graph" role="listbox" aria-label="Commits"></div>
+  </section>
+
+  <section class="right" aria-label="Details">
+    <div class="tabs" role="tablist" aria-label="Detail panels">
+      <button class="tab" role="tab" data-tab="detail" aria-selected="true" id="tab-detail">Detail</button>
+      <button class="tab" role="tab" data-tab="credentials" aria-selected="false" id="tab-credentials">Credentials</button>
+    </div>
+    <div id="pane-detail" role="tabpanel" aria-labelledby="tab-detail" class="pane">
+      <div class="empty">Select a file, a commit or a proposal to see its diff.</div>
+    </div>
+    <div id="pane-credentials" role="tabpanel" aria-labelledby="tab-credentials" class="pane" hidden></div>
+  </section>
+</main>
+
+<section class="bottom" aria-label="Assistant and terminals">
+  <div class="tabs" role="tablist" aria-label="Bottom panels" id="bottom-tabs">
+    <button class="tab" role="tab" data-tab="proposals" aria-selected="true">Proposals</button>
+    <button class="tab" role="tab" data-tab="events" aria-selected="false">Events</button>
+  </div>
+  <div id="pane-proposals" role="tabpanel" class="pane">
+    <div id="store-missing" class="empty" hidden>
+      This repository has no Argonauta store yet.
+      <button class="btn primary" id="btn-init" type="button">Initialize</button>
+    </div>
+    <div id="assistant" hidden>
+      <form id="propose-form" class="propose-form">
+        <label for="task">Ask for a change</label>
+        <div class="row">
+          <input id="task" type="text" maxlength="4000" placeholder="e.g. Make power() handle negative exponents" required>
+          <label class="check"><input type="checkbox" id="dry-run"> Dry run</label>
+          <button class="btn primary" id="btn-propose" type="submit">Propose</button>
+          <button class="btn" id="btn-index" type="button">Index</button>
+          <button class="btn" id="btn-test" type="button">Run tests</button>
+        </div>
+        <div class="muted" id="provider-line"></div>
+        <div id="propose-error" class="field-error" role="alert"></div>
+      </form>
+      <div id="proposals-empty" class="empty" hidden>No proposals yet. Describe a change above.</div>
+      <table id="proposals-table" class="table" hidden>
+        <thead><tr><th scope="col">#</th><th scope="col">Status</th><th scope="col">Tests</th><th scope="col">Commit</th><th scope="col">Task</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+  <div id="pane-events" role="tabpanel" class="pane" hidden><table class="table" id="events-table"><thead><tr><th scope="col">Time</th><th scope="col">Kind</th><th scope="col">Message</th></tr></thead><tbody></tbody></table></div>
+  <div id="terminal-panes"></div>
+</section>
+
+<div id="toasts" class="toasts" aria-live="polite" aria-atomic="false"></div>
+<dialog id="dialog" class="dialog">
+  <form method="dialog" id="dialog-form">
+    <button type="submit" value="ok" hidden aria-hidden="true" tabindex="-1"></button>
+    <h2 id="dialog-title"></h2>
+    <p id="dialog-text"></p>
+    <label id="dialog-input-label" hidden><span id="dialog-input-name"></span><input id="dialog-input" type="text" maxlength="4000"></label>
+    <div class="row end">
+      <button class="btn" value="cancel" type="submit">Cancel</button>
+      <button class="btn primary" value="ok" id="dialog-ok" type="submit">OK</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="help" class="dialog">
+  <form method="dialog">
+    <h2>Keyboard shortcuts</h2>
+    <dl class="shortcuts">
+      <dt>p</dt><dd>Focus the proposal task field</dd>
+      <dt>c</dt><dd>Focus the commit message</dd>
+      <dt>t</dt><dd>Open a new terminal tab</dd>
+      <dt>/</dt><dd>Filter commits</dd>
+      <dt>Esc</dt><dd>Close dialogs</dd>
+      <dt>?</dt><dd>This help</dd>
+    </dl>
+    <div class="row end"><button class="btn primary" value="close" type="submit">Close</button></div>
+  </form>
+</dialog>
+
+<script src="/vendor/xterm.js"></script>
+<script src="/vendor/addon-fit.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,398 @@
+/* Argonauta web UI. One file, no build step, no network beyond the local server. */
+(function () {
+  "use strict";
+  const $ = (sel, root) => (root || document).querySelector(sel);
+  const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const LANES = ["--lane0", "--lane1", "--lane2", "--lane3", "--lane4", "--lane5"];
+  const SIG = { good: "✓", bad: "✗", good_untrusted: "~", expired_signature: "⌛", expired_key: "⌛", revoked: "✗", unknown_key: "?", unsigned: "·" };
+
+  const S = {
+    token: null, workspaces: [], repoId: null, state: null, graph: [], proposals: [], events: [],
+    selection: null, rightTab: "detail", bottomTab: "proposals", terminals: new Map(), busy: new Set(), filter: "", pollTimer: null,
+  };
+
+  // ----- token and api -----------------------------------------------------------------
+  function readToken() {
+    const m = /[#&]token=([A-Za-z0-9_\-]+)/.exec(location.hash);
+    if (m) { try { sessionStorage.setItem("argonauta.token", m[1]); } catch (e) { /* private mode */ } history.replaceState(null, "", location.pathname); return m[1]; }
+    try { return sessionStorage.getItem("argonauta.token"); } catch (e) { return null; }
+  }
+  async function api(method, path, body) {
+    const headers = { Authorization: "Bearer " + S.token };
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    const resp = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    let data = null;
+    try { data = await resp.json(); } catch (e) { data = null; }
+    if (!resp.ok) { const err = new Error((data && data.error) || ("HTTP " + resp.status)); err.status = resp.status; err.data = data; throw err; }
+    return data;
+  }
+  const rp = (suffix) => "/api/repos/" + S.repoId + suffix;
+
+  // ----- toasts, dialogs, busy ---------------------------------------------------------------
+  function toast(kind, text, sticky) {
+    const el = document.createElement("div");
+    el.className = "toast " + kind; el.setAttribute("role", kind === "bad" ? "alert" : "status");
+    el.innerHTML = '<span class="sym">' + ({ ok: "✓", bad: "✗", warn: "!", info: "·" }[kind] || "·") + "</span>" + esc(text);
+    $("#toasts").appendChild(el);
+    setTimeout(() => el.remove(), sticky ? 15000 : 5000);
+  }
+  function dialog(title, text, opts) {
+    opts = opts || {};
+    return new Promise((resolve) => {
+      const d = $("#dialog");
+      $("#dialog-title").textContent = title; $("#dialog-text").textContent = text;
+      const label = $("#dialog-input-label"), input = $("#dialog-input");
+      label.hidden = !opts.input; $("#dialog-input-name").textContent = opts.input || ""; input.value = opts.value || "";
+      $("#dialog-ok").textContent = opts.ok || "OK"; $("#dialog-ok").className = "btn " + (opts.danger ? "danger" : "primary");
+      const onClose = () => { d.removeEventListener("close", onClose); resolve(d.returnValue === "ok" ? (opts.input ? input.value : true) : null); };
+      d.addEventListener("close", onClose); d.showModal();
+      if (opts.input) input.focus(); else $("#dialog-ok").focus();  // Enter confirms; Esc cancels
+    });
+  }
+  function setBusy(key, on) {
+    if (on) S.busy.add(key); else S.busy.delete(key);
+    const anyRemote = ["fetch", "pull", "push"].some((k) => S.busy.has(k));
+    ["fetch", "pull", "push"].forEach((k) => { const b = $("#btn-" + k); b.disabled = anyRemote; b.innerHTML = S.busy.has(k) ? '<span class="spinner"></span>' + k[0].toUpperCase() + k.slice(1) : k[0].toUpperCase() + k.slice(1); });
+    const assistantBusy = ["index", "propose", "test", "apply"].some((k) => S.busy.has(k));
+    ["propose", "index", "test"].forEach((k) => { const b = $("#btn-" + k); if (b) b.disabled = assistantBusy; });
+    $("#btn-commit").disabled = S.busy.has("commit");
+  }
+
+  // ----- jobs ------------------------------------------------------------------------------
+  async function runJob(kind, body, label) {
+    setBusy(kind, true);
+    const status = toastProgress(label || kind);
+    try {
+      const data = await api("POST", rp("/jobs/" + kind), body || {});
+      let job = data.job;
+      while (job.status === "queued" || job.status === "running") {
+        await new Promise((r) => setTimeout(r, 500));
+        job = await api("GET", "/api/jobs/" + job.id);
+        status.update(job.progress || label || kind);
+      }
+      status.remove();
+      if (job.status === "failed") { toast("bad", (label || kind) + ": " + job.error, true); return null; }
+      return job.result;
+    } catch (err) {
+      status.remove();
+      if (err.status === 409 && err.data && err.data.job) toast("warn", "Another operation is running: " + err.data.job.kind);
+      else toast("bad", (label || kind) + ": " + err.message, true);
+      return null;
+    } finally { setBusy(kind, false); refreshState(); }
+  }
+  function toastProgress(text) {
+    const el = document.createElement("div"); el.className = "toast info"; el.setAttribute("role", "status");
+    el.innerHTML = '<span class="spinner"></span><span class="t"></span>'; $(".t", el).textContent = text; $("#toasts").appendChild(el);
+    return { update: (t) => { $(".t", el).textContent = t; }, remove: () => el.remove() };
+  }
+
+  // ----- workspaces ---------------------------------------------------------------------------
+  async function loadWorkspaces() {
+    const data = await api("GET", "/api/workspaces");
+    S.workspaces = data.workspaces;
+    const repos = S.workspaces.flatMap((w) => w.repos.map((r) => ({ ...r, workspace: w })));
+    let remembered = null; try { remembered = localStorage.getItem("argonauta.repo"); } catch (e) { /* ignore */ }
+    if (!S.repoId || !repos.some((r) => r.id === S.repoId)) {
+      const pick = repos.find((r) => r.id === remembered && r.exists) || repos.find((r) => r.exists) || null;
+      S.repoId = pick ? pick.id : null;
+    }
+    renderWorkspaces();
+  }
+  function renderWorkspaces() {
+    const wsSel = $("#workspace-select"), repoSel = $("#repo-select"), tree = $("#workspace-list");
+    wsSel.innerHTML = S.workspaces.map((w) => '<option value="' + esc(w.id) + '">' + esc(w.name) + "</option>").join("");
+    const current = S.workspaces.find((w) => w.repos.some((r) => r.id === S.repoId)) || S.workspaces[0];
+    if (current) wsSel.value = current.id;
+    repoSel.innerHTML = (current ? current.repos : []).map((r) => '<option value="' + esc(r.id) + '"' + (r.exists ? "" : " disabled") + ">" + esc(r.name) + (r.exists ? "" : " (missing)") + "</option>").join("");
+    if (S.repoId) repoSel.value = S.repoId;
+    tree.innerHTML = S.workspaces.map((w) => '<li class="ws" role="treeitem" aria-expanded="true">' + esc(w.name) + ' <button class="btn mini" data-del-ws="' + esc(w.id) + '" aria-label="Remove workspace ' + esc(w.name) + '">×</button></li>' +
+      w.repos.map((r) => '<li class="repo' + (r.id === S.repoId ? " active" : "") + (r.exists ? "" : " missing") + '" role="treeitem" tabindex="0" data-repo="' + esc(r.id) + '" title="' + esc(r.path) + '">' + esc(r.name) + (r.exists ? "" : " (missing)") + ' <button class="btn mini" data-del-repo="' + esc(r.id) + '" data-ws="' + esc(w.id) + '" aria-label="Remove repository ' + esc(r.name) + '">×</button></li>').join("")).join("");
+    if (!S.workspaces.length) tree.innerHTML = '<li class="empty">No workspaces. Click “+ Workspace”, then “+ Repo”.</li>';
+  }
+  async function selectRepo(id) {
+    S.repoId = id; S.selection = null; S.graph = []; S.proposals = [];
+    try { localStorage.setItem("argonauta.repo", id); } catch (e) { /* ignore */ }
+    renderWorkspaces(); renderDetail();
+    await refreshAll();
+  }
+
+  // ----- state and graph -------------------------------------------------------------------
+  async function refreshState() {
+    if (!S.repoId) { S.state = null; renderState(); return; }
+    try { S.state = await api("GET", rp("/state")); } catch (err) { S.state = null; toast("bad", "State: " + err.message); }
+    renderState();
+  }
+  async function refreshGraph() {
+    if (!S.repoId) { S.graph = []; renderGraph(); return; }
+    try { S.graph = (await api("GET", rp("/graph?limit=300"))).commits; } catch (err) { S.graph = []; }
+    renderGraph();
+  }
+  async function refreshAssistant() {
+    if (!S.state || !S.state.store.initialized) { S.proposals = []; S.events = []; renderAssistant(); return; }
+    try {
+      S.proposals = (await api("GET", rp("/proposals?limit=100"))).proposals;
+      S.events = (await api("GET", rp("/events?limit=200"))).events;
+    } catch (err) { S.proposals = []; S.events = []; }
+    renderAssistant();
+  }
+  async function refreshAll() { await refreshState(); await Promise.all([refreshGraph(), refreshAssistant()]); }
+
+  function renderState() {
+    const st = S.state;
+    $("#branch-pill").textContent = st ? (st.branch + (st.upstream ? " → " + st.upstream + " (" + st.ahead + "↑ " + st.behind + "↓)" : " (no upstream)")) : "no repository";
+    const bl = $("#branch-list"), rl = $("#remote-branch-list");
+    if (!st) { bl.innerHTML = ""; rl.innerHTML = ""; renderChanges(null); $("#store-missing").hidden = true; $("#assistant").hidden = true; return; }
+    const locals = st.branches.filter((b) => !b.remote), remotes = st.branches.filter((b) => b.remote);
+    bl.innerHTML = locals.map((b) => '<li role="option" tabindex="0" aria-selected="' + b.is_current + '" data-branch="' + esc(b.name) + '"><span class="name">' + (b.is_current ? "● " : "○ ") + esc(b.name) + "</span>" +
+      (b.upstream ? '<span class="badge" title="ahead/behind upstream">' + b.ahead + "↑" + b.behind + "↓" + (b.gone ? " gone" : "") + "</span>" : "") +
+      (b.is_current ? "" : '<button class="btn mini" data-del-branch="' + esc(b.name) + '" aria-label="Delete branch ' + esc(b.name) + '">×</button>') + "</li>").join("") || '<li class="muted">No local branches yet.</li>';
+    rl.innerHTML = remotes.map((b) => '<li role="option" tabindex="0" aria-selected="false" data-remote-branch="' + esc(b.name) + '"><span class="name">' + esc(b.name) + '</span><span class="badge">' + esc(b.sha) + "</span></li>").join("") || '<li class="muted">No remote branches (' + (st.remotes.length ? st.remotes.map((r) => r.name).join(", ") : "no remotes") + ").</li>";
+    renderChanges(st.status);
+    const store = st.store;
+    $("#store-missing").hidden = store.initialized; $("#assistant").hidden = !store.initialized;
+    $("#provider-line").textContent = store.initialized ? "Provider: " + store.provider + " · " + (store.indexed_files ? store.indexed_files + " files indexed" : "nothing indexed yet, click Index") + " · tests: " + (store.test_command || "not set") : "";
+    if (store.provider_name === "manual" && store.initialized) $("#provider-line").textContent += " · degraded mode: no API key, proposals produce a prompt bundle";
+    const running = st.running_job; if (running && !S.busy.has(running.kind)) watchJob(running);
+  }
+  function watchJob(job) { setBusy(job.kind, true); (async () => { let j = job; while (j.status === "queued" || j.status === "running") { await new Promise((r) => setTimeout(r, 700)); try { j = await api("GET", "/api/jobs/" + j.id); } catch (e) { break; } } setBusy(job.kind, false); refreshAll(); })(); }
+
+  function renderChanges(status) {
+    const staged = $("#staged-list"), unstaged = $("#unstaged-list");
+    if (!status) { staged.innerHTML = ""; unstaged.innerHTML = ""; $("#changes-count").textContent = ""; $("#changes-empty").hidden = true; return; }
+    const total = status.staged.length + status.unstaged.length + status.untracked.length + status.conflicted.length;
+    $("#changes-count").textContent = total ? total + " changed" : ""; $("#changes-empty").hidden = total > 0;
+    const conflicts = $("#conflicts"); conflicts.hidden = !status.conflicted.length;
+    conflicts.textContent = status.conflicted.length ? "Conflicts in: " + status.conflicted.map((e) => e.path).join(", ") + ". Resolve them with git, then stage." : "";
+    const row = (e, area, code) => '<li><input type="checkbox" aria-label="' + (area === "index" ? "Unstage " : "Stage ") + esc(e.path) + '" data-toggle="' + area + '" data-path="' + esc(e.path) + '"' + (area === "index" ? " checked" : "") + '><span class="code ' + esc(code) + '">' + esc(code) + '</span><button type="button" class="path" data-diff="' + area + '" data-path="' + esc(e.path) + '">' + esc(e.path) + '</button><button type="button" class="btn mini" data-discard="' + esc(e.path) + '" aria-label="Discard changes in ' + esc(e.path) + '">discard</button></li>';
+    staged.innerHTML = status.staged.map((e) => row(e, "index", e.index)).join("") || '<li class="muted">Nothing staged.</li>';
+    unstaged.innerHTML = status.unstaged.map((e) => row(e, "worktree", e.worktree)).concat(status.untracked.map((e) => row(e, "worktree", "?"))).join("") || '<li class="muted">No unstaged changes.</li>';
+  }
+
+  function renderGraph() {
+    const box = $("#graph"), rows = S.filter ? S.graph.filter((c) => (c.subject + " " + c.author + " " + c.sha + " " + c.refs.join(" ")).toLowerCase().includes(S.filter)) : S.graph;
+    $("#graph-empty").hidden = S.graph.length > 0; $("#graph-count").textContent = S.graph.length ? rows.length + " of " + S.graph.length : "";
+    const maxLane = rows.reduce((m, c) => Math.max(m, c.lane, ...(c.parent_lanes || []), c.active.length - 1), 0);
+    const laneW = 14, rowH = 28, x = (l) => 10 + l * laneW, y = (i) => i * rowH + rowH / 2;
+    box.style.setProperty("--lanes-width", (x(maxLane) + 14) + "px");
+    const color = (l) => "var(" + LANES[l % LANES.length] + ")";
+    const paths = [];
+    rows.forEach((c, i) => {
+      const next = rows[i + 1];
+      (c.active || []).forEach((on, col) => {
+        if (!on) return;
+        const merging = next && next.merged_lanes.includes(col) && next.lane !== col;
+        if (col === c.lane) paths.push('<path d="M' + x(col) + "," + y(i) + " L" + x(col) + "," + y(i + 1) + '" stroke="' + color(col) + '"/>');
+        else if (c.parent_lanes.includes(col)) paths.push('<path d="M' + x(c.lane) + "," + y(i) + " C" + x(c.lane) + "," + (y(i) + rowH / 2) + " " + x(col) + "," + (y(i) + rowH / 2) + " " + x(col) + "," + y(i + 1) + '" stroke="' + color(col) + '"/>');
+        else if (merging) paths.push('<path d="M' + x(col) + "," + y(i) + " C" + x(col) + "," + (y(i) + rowH / 2) + " " + x(next.lane) + "," + (y(i) + rowH / 2) + " " + x(next.lane) + "," + y(i + 1) + '" stroke="' + color(col) + '"/>');
+        else paths.push('<path d="M' + x(col) + "," + y(i) + " L" + x(col) + "," + y(i + 1) + '" stroke="' + color(col) + '"/>');
+      });
+      paths.push('<circle cx="' + x(c.lane) + '" cy="' + y(i) + '" r="4.5" fill="' + color(c.lane) + '"/>');
+    });
+    const svg = '<svg width="' + (x(maxLane) + 14) + '" height="' + (rows.length * rowH) + '" fill="none" stroke-width="2" aria-hidden="true">' + paths.join("") + "</svg>";
+    box.innerHTML = svg + rows.map((c) => {
+      const refs = c.refs.map((r) => '<span class="ref' + (r.startsWith("HEAD") ? " head" : "") + '">' + esc(r.replace("HEAD -> ", "")) + "</span>").join("");
+      const word = sigWord(c.signature);
+      return '<div class="row-c" role="option" tabindex="0" aria-selected="' + (S.selection && S.selection.type === "commit" && S.selection.sha === c.sha) + '" data-sha="' + esc(c.sha) + '"><span></span><span class="subject">' + refs + esc(c.subject) + '</span><span class="sig ' + word + '" title="signature: ' + word + '">' + (SIG[word] || "·") + '</span><span class="sha">' + esc(c.short) + "</span></div>";
+    }).join("");
+  }
+  function sigWord(code) { return { G: "good", B: "bad", U: "good_untrusted", X: "expired_signature", Y: "expired_key", R: "revoked", E: "unknown_key", N: "unsigned" }[code] || "unsigned"; }
+
+  // ----- right pane ----------------------------------------------------------------------
+  function diffHtml(diff) {
+    if (!diff || !diff.trim()) return '<div class="empty">No differences.</div>';
+    return '<div class="diff">' + diff.split("\n").map((line) => {
+      let cls = "";
+      if (line.startsWith("+++") || line.startsWith("---") || line.startsWith("diff ") || line.startsWith("index ")) cls = "meta";
+      else if (line.startsWith("@@")) cls = "hunk"; else if (line.startsWith("+")) cls = "add"; else if (line.startsWith("-")) cls = "del";
+      return '<div class="' + cls + '">' + (esc(line) || " ") + "</div>";
+    }).join("") + "</div>";
+  }
+  async function showFileDiff(area, path) {
+    S.selection = { type: "file", area, path }; selectTab("right", "detail");
+    const pane = $("#pane-detail"); pane.innerHTML = '<div class="muted"><span class="spinner"></span>Loading ' + esc(path) + "…</div>";
+    try { const d = await api("GET", rp("/diff?path=" + encodeURIComponent(path) + "&area=" + area)); pane.innerHTML = "<h2>" + esc(path) + " · " + (area === "index" ? "staged" : "working tree") + "</h2>" + diffHtml(d.diff); }
+    catch (err) { pane.innerHTML = '<div class="empty">✗ ' + esc(err.message) + "</div>"; }
+  }
+  async function showCommit(sha) {
+    S.selection = { type: "commit", sha }; selectTab("right", "detail"); renderGraph();
+    const pane = $("#pane-detail"); pane.innerHTML = '<div class="muted"><span class="spinner"></span>Loading commit…</div>';
+    try {
+      const d = await api("GET", rp("/commits/" + sha));
+      const c = d.commit, sig = sigWord(c.signature);
+      pane.innerHTML = "<h2>" + esc(c.subject) + "</h2><dl class='kv'><dt>sha</dt><dd>" + esc(c.sha) + "</dd><dt>author</dt><dd>" + esc(c.author) + " &lt;" + esc(c.email) + "&gt;</dd><dt>date</dt><dd>" + esc(c.date) + "</dd><dt>signature</dt><dd class='sig " + sig + "'>" + (SIG[sig] || "·") + " " + sig.replace("_", " ") + (d.signer ? " · " + esc(d.signer) : "") + (d.key_id ? " · key " + esc(d.key_id) : "") + "</dd>" + (c.refs.length ? "<dt>refs</dt><dd>" + esc(c.refs.join(", ")) + "</dd>" : "") + "</dl>" + (d.body ? "<p>" + esc(d.body).replace(/\n/g, "<br>") + "</p>" : "") +
+        "<ul class='files'>" + d.files.map((f) => "<li><span></span><span class='code " + esc(f.status) + "'>" + esc(f.status) + "</span><span class='path'>" + esc(f.path) + "</span><span class='muted'>+" + f.insertions + " −" + f.deletions + "</span></li>").join("") + "</ul>" + diffHtml(d.diff);
+    } catch (err) { pane.innerHTML = '<div class="empty">✗ ' + esc(err.message) + "</div>"; }
+  }
+  async function showProposal(pid) {
+    S.selection = { type: "proposal", id: pid }; selectTab("right", "detail");
+    const pane = $("#pane-detail"); pane.innerHTML = '<div class="muted"><span class="spinner"></span>Loading proposal…</div>';
+    try {
+      const d = await api("GET", rp("/proposals/" + pid)); const p = d.proposal, ch = d.change, runs = d.test_runs;
+      const can = { apply: p.status === "proposed", reject: ["proposed", "invalid"].includes(p.status), revert: p.status === "applied" && ch && !ch.reverted_at, commit: p.status === "applied" && ch && !ch.commit_sha };
+      pane.innerHTML = "<h2>Proposal #" + p.id + (p.is_sample ? " [SAMPLE]" : "") + "</h2><dl class='kv'><dt>status</dt><dd>" + esc(p.status) + "</dd><dt>task</dt><dd>" + esc(p.task) + "</dd><dt>provider</dt><dd>" + esc(p.provider + " / " + p.model) + "</dd><dt>context</dt><dd>" + esc(p.context_files.join(", ") || "(none)") + "</dd>" + (p.notes ? "<dt>notes</dt><dd>" + esc(p.notes) + "</dd>" : "") + (ch ? "<dt>change</dt><dd>" + ch.files.length + " files, +" + ch.insertions + " −" + ch.deletions + (ch.commit_sha ? ", commit " + esc(ch.commit_sha.slice(0, 10)) : ", not committed") + (ch.reverted_at ? ", reverted" : "") + "</dd>" : "") + "</dl>" +
+        '<div class="row">' + (can.apply ? '<label class="check"><input type="checkbox" id="apply-test" checked> run tests</label><label class="check"><input type="checkbox" id="apply-commit" checked> commit on green</label><button class="btn primary" data-prop-apply="' + p.id + '">Apply</button>' : "") + (can.reject ? '<button class="btn" data-prop-reject="' + p.id + '">Reject</button>' : "") + (can.commit ? '<button class="btn" data-prop-commit="' + p.id + '">Commit</button>' : "") + (can.revert ? '<button class="btn danger" data-prop-revert="' + p.id + '">Revert</button>' : "") + "</div>" +
+        (p.explanation ? "<p>" + esc(p.explanation).replace(/\n/g, "<br>") + "</p>" : "") + diffHtml(p.diff) +
+        (runs.length ? "<h3>Test runs</h3><table class='table'><thead><tr><th>#</th><th>status</th><th>exit</th><th>finished</th></tr></thead><tbody>" + runs.map((r) => "<tr><td>" + r.id + "</td><td class='status-" + (r.status === "passed" ? "ok" : "bad") + "'>" + esc(r.status) + "</td><td>" + esc(r.exit_code) + "</td><td>" + esc(r.finished_at) + "</td></tr>").join("") + "</tbody></table>" + (runs[0].status !== "passed" && runs[0].output_tail ? "<pre class='diff'>" + esc(runs[0].output_tail) + "</pre>" : "") : "");
+    } catch (err) { pane.innerHTML = '<div class="empty">✗ ' + esc(err.message) + "</div>"; }
+  }
+  async function showCredentials() {
+    selectTab("right", "credentials"); const pane = $("#pane-credentials");
+    if (!S.repoId) { pane.innerHTML = '<div class="empty">Select a repository first.</div>'; return; }
+    pane.innerHTML = '<div class="muted"><span class="spinner"></span>Inspecting credentials…</div>';
+    try {
+      const d = await api("GET", rp("/credentials")); const id = d.identity, ssh = d.ssh, sg = d.signing, head = d.head;
+      const yn = (v) => v === true ? "<span class='status-ok'>yes</span>" : v === false ? "<span class='status-bad'>no</span>" : "<span class='muted'>unknown</span>";
+      pane.innerHTML = "<h2>Git identity</h2><dl class='kv'><dt>name</dt><dd>" + esc(id.name || "unset") + "</dd><dt>email</dt><dd>" + esc(id.email || "unset") + "</dd><dt>source</dt><dd>" + esc(id.source) + "</dd></dl>" +
+        "<h2>SSH</h2><dl class='kv'><dt>remote</dt><dd>" + esc(ssh.remote_url || "none") + "</dd><dt>kind</dt><dd>" + esc(ssh.kind) + "</dd>" + (ssh.kind === "ssh" ? "<dt>host alias</dt><dd>" + esc(ssh.host_alias) + " → " + esc(ssh.resolved_hostname || "?") + " as " + esc(ssh.user || "?") + "</dd><dt>agent running</dt><dd>" + yn(ssh.agent.running) + "</dd><dt>key loaded</dt><dd>" + yn(ssh.agent.loaded) + "</dd>" : "") + (ssh.kind === "https" ? "<dt>credential helper</dt><dd>" + esc(ssh.credential_helper) + "</dd>" : "") + "</dl>" +
+        (ssh.identity_files.length ? "<ul class='files'>" + ssh.identity_files.map((f) => "<li><span></span><span class='code'>" + (f.exists ? "✓" : "✗") + "</span><span class='path'>" + esc(f.path) + (f.type ? " · " + esc(f.type) + " " + f.bits : "") + (f.comment ? " · " + esc(f.comment) : "") + "</span><span class='muted'>" + (f.fingerprint ? esc(f.fingerprint) : "no public key file") + (f.in_agent === true ? " · in agent" : f.in_agent === false ? " · not in agent" : "") + "</span></li>").join("") + "</ul>" : "") +
+        "<h2>Commit signing</h2><dl class='kv'><dt>enabled</dt><dd>" + yn(sg.enabled) + "</dd>" + (sg.enabled ? "<dt>format</dt><dd>" + esc(sg.format) + "</dd><dt>key</dt><dd>" + esc(sg.key_id || "unset") + (sg.fingerprint ? " · " + esc(sg.fingerprint) : "") + "</dd><dt>uid</dt><dd>" + esc(sg.uid || "?") + "</dd><dt>valid</dt><dd>" + esc((sg.created || "?") + " → " + (sg.expires || "no expiry")) + "</dd><dt>status</dt><dd class='status-" + (sg.status === "ok" ? "ok" : "bad") + "'>" + esc(sg.status) + "</dd>" : "") + "</dl>" +
+        "<h2>HEAD signature</h2><dl class='kv'><dt>commit</dt><dd>" + esc(head.sha || "none") + "</dd><dt>status</dt><dd class='sig " + esc(head.signature) + "'>" + (SIG[head.signature] || "·") + " " + esc(head.signature.replace("_", " ")) + (head.signer ? " · " + esc(head.signer) : "") + "</dd></dl><p class='muted'>Private keys are never read. Only public key files, agent listings and git/gpg metadata.</p>";
+    } catch (err) { pane.innerHTML = '<div class="empty">✗ ' + esc(err.message) + "</div>"; }
+  }
+  function renderDetail() { if (!S.selection) $("#pane-detail").innerHTML = '<div class="empty">Select a file, a commit or a proposal to see its diff.</div>'; }
+
+  // ----- assistant -----------------------------------------------------------------------
+  function renderAssistant() {
+    const table = $("#proposals-table"), body = $("tbody", table);
+    $("#proposals-empty").hidden = S.proposals.length > 0 || !(S.state && S.state.store.initialized); table.hidden = !S.proposals.length;
+    body.innerHTML = S.proposals.map((p) => "<tr tabindex='0' data-prop='" + p.id + "'><td>" + p.id + "</td><td>" + esc(p.status) + "</td><td>" + (p.last_test ? esc(p.last_test.status) : "–") + "</td><td>" + (p.change && p.change.commit_sha ? esc(p.change.commit_sha.slice(0, 8)) : "–") + "</td><td>" + esc(p.task) + "</td></tr>").join("");
+    $("tbody", $("#events-table")).innerHTML = S.events.map((e) => "<tr><td>" + esc(e.ts.slice(0, 19).replace("T", " ")) + "</td><td>" + esc(e.kind) + "</td><td>" + esc(e.message) + "</td></tr>").join("") || "<tr><td colspan='3' class='muted'>No events yet.</td></tr>";
+  }
+
+  // ----- terminals -----------------------------------------------------------------------
+  async function openTerminal() {
+    if (!S.repoId) { toast("warn", "Select a repository first."); return; }
+    let data;
+    try { data = await api("POST", rp("/terminals"), { cols: 120, rows: 30 }); } catch (err) { toast("bad", "Terminal: " + err.message); return; }
+    const t = data.terminal, tabs = $("#bottom-tabs");
+    const tab = document.createElement("button"); tab.className = "tab"; tab.setAttribute("role", "tab"); tab.dataset.tab = "term-" + t.id; tab.innerHTML = "Terminal <span class='close' aria-label='Close terminal'>×</span>"; tabs.appendChild(tab);
+    const pane = document.createElement("div"); pane.id = "pane-term-" + t.id; pane.className = "pane term-pane"; pane.setAttribute("role", "tabpanel"); pane.hidden = true; $("#terminal-panes").appendChild(pane);
+    const term = new Terminal({ cursorBlink: true, fontSize: 13, theme: { background: "#000000" } }); const fit = new FitAddon.FitAddon(); term.loadAddon(fit); term.open(pane);
+    const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws/terminals/" + t.id); ws.binaryType = "arraybuffer";
+    const entry = { id: t.id, term, fit, ws, tab, pane }; S.terminals.set(t.id, entry);
+    // Auth must be the first frame: fit() can fire onResize, which would otherwise arrive before it.
+    ws.onopen = () => { ws.send(JSON.stringify({ type: "auth", token: S.token, cols: term.cols, rows: term.rows })); selectTab("bottom", "term-" + t.id); fit.fit(); term.focus(); };
+    ws.onmessage = (ev) => term.write(new Uint8Array(ev.data));
+    ws.onclose = () => { term.write("\r\n\x1b[2m[terminal closed]\x1b[0m\r\n"); };
+    term.onData((d) => { if (ws.readyState === 1) ws.send(new TextEncoder().encode(d)); });
+    term.onResize(({ cols, rows }) => { if (ws.readyState === 1) ws.send(JSON.stringify({ type: "resize", cols, rows })); });
+    $(".close", tab).addEventListener("click", (ev) => { ev.stopPropagation(); closeTerminal(t.id); });
+  }
+  async function closeTerminal(id) {
+    const e = S.terminals.get(id); if (!e) return;
+    try { e.ws.close(); } catch (err) { /* ignore */ }
+    try { await api("DELETE", "/api/terminals/" + id); } catch (err) { /* already gone */ }
+    e.term.dispose(); e.tab.remove(); e.pane.remove(); S.terminals.delete(id); selectTab("bottom", "proposals");
+  }
+  window.addEventListener("resize", () => S.terminals.forEach((e) => { if (!e.pane.hidden) e.fit.fit(); }));
+
+  // ----- tabs ------------------------------------------------------------------------------
+  function selectTab(region, name) {
+    if (region === "right") {
+      S.rightTab = name;
+      $$(".right .tab").forEach((t) => t.setAttribute("aria-selected", String(t.dataset.tab === name)));
+      $("#pane-detail").hidden = name !== "detail"; $("#pane-credentials").hidden = name !== "credentials";
+    } else {
+      S.bottomTab = name;
+      $$("#bottom-tabs .tab").forEach((t) => t.setAttribute("aria-selected", String(t.dataset.tab === name)));
+      $("#pane-proposals").hidden = name !== "proposals"; $("#pane-events").hidden = name !== "events";
+      S.terminals.forEach((e) => { e.pane.hidden = e.tab.dataset.tab !== name; if (!e.pane.hidden) { e.fit.fit(); e.term.focus(); } });
+    }
+  }
+
+  // ----- event wiring -----------------------------------------------------------------------
+  function wire() {
+    $("#workspace-select").addEventListener("change", (ev) => { const w = S.workspaces.find((x) => x.id === ev.target.value); const r = w && w.repos.find((x) => x.exists); if (r) selectRepo(r.id); else { S.repoId = null; renderWorkspaces(); refreshAll(); } });
+    $("#repo-select").addEventListener("change", (ev) => selectRepo(ev.target.value));
+    $("#workspace-list").addEventListener("click", async (ev) => {
+      const del = ev.target.closest("[data-del-repo]"), delWs = ev.target.closest("[data-del-ws]"), repo = ev.target.closest("[data-repo]");
+      if (del) { if (await dialog("Remove repository", "Remove it from the workspace? Files on disk are not touched.", { ok: "Remove", danger: true })) { await api("DELETE", "/api/workspaces/" + del.dataset.ws + "/repos/" + del.dataset.delRepo).catch((e) => toast("bad", e.message)); await loadWorkspaces(); await refreshAll(); } return; }
+      if (delWs) { if (await dialog("Remove workspace", "Remove this workspace and its repository list? Files on disk are not touched.", { ok: "Remove", danger: true })) { await api("DELETE", "/api/workspaces/" + delWs.dataset.delWs).catch((e) => toast("bad", e.message)); await loadWorkspaces(); await refreshAll(); } return; }
+      if (repo && !repo.classList.contains("missing")) selectRepo(repo.dataset.repo);
+    });
+    $("#workspace-list").addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.target.dataset.repo) selectRepo(ev.target.dataset.repo); });
+    $("#btn-add-workspace").addEventListener("click", async () => { const name = await dialog("New workspace", "", { input: "Name", ok: "Create" }); if (name) { try { await api("POST", "/api/workspaces", { name }); await loadWorkspaces(); toast("ok", "Workspace created"); } catch (e) { toast("bad", e.message); } } });
+    $("#btn-add-repo").addEventListener("click", async () => {
+      if (!S.workspaces.length) { toast("warn", "Create a workspace first."); return; }
+      const wid = $("#workspace-select").value || S.workspaces[0].id;
+      const path = await dialog("Add repository", "Absolute path to a folder inside a git repository on this machine.", { input: "Path", ok: "Add" });
+      if (path) { try { const r = await api("POST", "/api/workspaces/" + wid + "/repos", { path }); await loadWorkspaces(); toast("ok", "Added " + r.name); selectRepo(r.id); } catch (e) { toast("bad", e.message, true); } }
+    });
+    ["fetch", "pull", "push"].forEach((k) => $("#btn-" + k).addEventListener("click", async () => {
+      if (!S.repoId) return;
+      const body = {}; if (k === "push" && S.state && !S.state.upstream) { if (!(await dialog("Push", "No upstream is set. Push to origin and set it as upstream?", { ok: "Push" }))) return; body.set_upstream = true; }
+      const res = await runJob(k, body, k[0].toUpperCase() + k.slice(1)); if (res) toast("ok", k + " done" + (res.output ? ": " + res.output.split("\n").slice(-1)[0] : "")); await refreshGraph();
+    }));
+    $("#btn-terminal").addEventListener("click", openTerminal);
+    $("#btn-credentials").addEventListener("click", showCredentials);
+    $("#btn-help").addEventListener("click", () => $("#help").showModal());
+    $$(".right .tab").forEach((t) => t.addEventListener("click", () => { if (t.dataset.tab === "credentials") showCredentials(); else selectTab("right", "detail"); }));
+    $("#bottom-tabs").addEventListener("click", (ev) => { const t = ev.target.closest(".tab"); if (t && !ev.target.classList.contains("close")) selectTab("bottom", t.dataset.tab); });
+    $("#branch-list").addEventListener("click", async (ev) => {
+      const del = ev.target.closest("[data-del-branch]"); const li = ev.target.closest("[data-branch]");
+      if (del) { const name = del.dataset.delBranch; if (await dialog("Delete branch", "Delete local branch " + name + "?", { ok: "Delete", danger: true })) { try { await api("DELETE", rp("/branches/" + encodeURIComponent(name))); toast("ok", "Deleted " + name); } catch (e) { if (e.status === 409 && /not fully merged/.test(e.message) && await dialog("Branch not merged", e.message + " Delete anyway?", { ok: "Force delete", danger: true })) { await api("DELETE", rp("/branches/" + encodeURIComponent(name) + "?force=1")).catch((x) => toast("bad", x.message)); } else toast("bad", e.message); } await refreshAll(); } return; }
+      if (li) { const name = li.dataset.branch; if (S.state && S.state.branch === name) return; try { await api("POST", rp("/checkout"), { name }); toast("ok", "Checked out " + name); await refreshAll(); } catch (e) { toast("bad", e.message, true); } }
+    });
+    $("#branch-list").addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.target.dataset.branch) ev.target.click(); });
+    $("#remote-branch-list").addEventListener("click", async (ev) => { const li = ev.target.closest("[data-remote-branch]"); if (!li) return; const name = li.dataset.remoteBranch.split("/").slice(1).join("/"); if (await dialog("Checkout remote branch", "Create local branch " + name + " tracking " + li.dataset.remoteBranch + "?", { ok: "Checkout" })) { try { await api("POST", rp("/branches"), { name, from: li.dataset.remoteBranch }); await api("POST", rp("/checkout"), { name }); toast("ok", "Checked out " + name); await refreshAll(); } catch (e) { toast("bad", e.message, true); } } });
+    $("#btn-new-branch").addEventListener("click", async () => { if (!S.repoId) return; const name = await dialog("New branch", "Created from the current HEAD and checked out.", { input: "Branch name", ok: "Create" }); if (!name) return; try { await api("POST", rp("/branches"), { name }); await api("POST", rp("/checkout"), { name }); toast("ok", "On " + name); await refreshAll(); } catch (e) { toast("bad", e.message, true); } });
+    const changes = $(".left");
+    changes.addEventListener("change", async (ev) => { const cb = ev.target.closest("[data-toggle]"); if (!cb) return; const path = cb.dataset.path, area = cb.dataset.toggle; try { await api("POST", rp(area === "index" ? "/unstage" : "/stage"), { paths: [path] }); } catch (e) { toast("bad", e.message); } await refreshState(); if (S.selection && S.selection.type === "file" && S.selection.path === path) showFileDiff(area === "index" ? "worktree" : "index", path); });
+    changes.addEventListener("click", async (ev) => {
+      const diff = ev.target.closest("[data-diff]"); if (diff) { showFileDiff(diff.dataset.diff, diff.dataset.path); return; }
+      const discard = ev.target.closest("[data-discard]"); if (discard) { const p = discard.dataset.discard; if (await dialog("Discard changes", "Discard all changes in " + p + "? Untracked files are deleted. This cannot be undone.", { ok: "Discard", danger: true })) { try { await api("POST", rp("/discard"), { paths: [p] }); toast("ok", "Discarded " + p); } catch (e) { toast("bad", e.message); } await refreshState(); if (S.selection && S.selection.path === p) { S.selection = null; renderDetail(); } } }
+    });
+    $("#btn-stage-all").addEventListener("click", async () => { const paths = $$("#unstaged-list [data-path]").map((e) => e.dataset.path); if (paths.length) { await api("POST", rp("/stage"), { paths }).catch((e) => toast("bad", e.message)); await refreshState(); } });
+    $("#btn-unstage-all").addEventListener("click", async () => { const paths = $$("#staged-list [data-path]").map((e) => e.dataset.path); if (paths.length) { await api("POST", rp("/unstage"), { paths }).catch((e) => toast("bad", e.message)); await refreshState(); } });
+    $("#commit-form").addEventListener("submit", async (ev) => {
+      ev.preventDefault(); const msg = $("#commit-message").value, err = $("#commit-error"); err.textContent = "";
+      if (!msg.trim()) { err.textContent = "Write a commit message."; $("#commit-message").focus(); return; }
+      setBusy("commit", true);
+      try { const r = await api("POST", rp("/commit"), { message: msg, amend: $("#commit-amend").checked }); toast("ok", "Committed " + r.sha.slice(0, 10)); $("#commit-message").value = ""; $("#commit-amend").checked = false; await refreshAll(); }
+      catch (e) { err.textContent = e.message; } finally { setBusy("commit", false); }
+    });
+    $("#commit-filter").addEventListener("input", (ev) => { S.filter = ev.target.value.trim().toLowerCase(); renderGraph(); });
+    $("#graph").addEventListener("click", (ev) => { const r = ev.target.closest("[data-sha]"); if (r) showCommit(r.dataset.sha); });
+    $("#graph").addEventListener("keydown", (ev) => { const r = ev.target.closest("[data-sha]"); if (!r) return; if (ev.key === "Enter") showCommit(r.dataset.sha); if (ev.key === "ArrowDown" && r.nextElementSibling) { ev.preventDefault(); r.nextElementSibling.focus(); } if (ev.key === "ArrowUp" && r.previousElementSibling && r.previousElementSibling.dataset.sha) { ev.preventDefault(); r.previousElementSibling.focus(); } });
+    $("#btn-init").addEventListener("click", async () => { const cmd = await dialog("Initialize Argonauta store", "Optional: the command that runs this repository's tests (for example: python -m pytest -q). You can set it later.", { input: "Test command", ok: "Initialize" }); if (cmd === null) return; try { await api("POST", rp("/init"), { test_command: cmd }); toast("ok", "Store created in .argonauta/"); await refreshAll(); } catch (e) { toast("bad", e.message, true); } });
+    $("#btn-index").addEventListener("click", async () => { const r = await runJob("index", {}, "Indexing"); if (r) toast("ok", "Indexed " + r.file_count + " files"); });
+    $("#btn-test").addEventListener("click", async () => { const r = await runJob("test", {}, "Running tests"); if (r) { toast(r.test_run.status === "passed" ? "ok" : "bad", "Tests " + r.test_run.status + " (exit " + r.test_run.exit_code + ")", r.test_run.status !== "passed"); await refreshAssistant(); } });
+    $("#propose-form").addEventListener("submit", async (ev) => {
+      ev.preventDefault(); const task = $("#task").value, err = $("#propose-error"); err.textContent = "";
+      if (!task.trim()) { err.textContent = "Describe the change you want."; $("#task").focus(); return; }
+      const r = await runJob("propose", { task, dry_run: $("#dry-run").checked }, "Proposing"); if (!r) return;
+      if (r.manual) { toast("warn", r.message, true); return; }
+      if (r.dry_run) { toast("info", "Would send " + r.context.length + " files: " + r.context.join(", "), true); return; }
+      $("#task").value = ""; await refreshAssistant(); showProposal(r.proposal.id);
+      toast(r.proposal.status === "invalid" ? "bad" : "ok", "Proposal #" + r.proposal.id + " " + r.proposal.status + (r.proposal.notes ? ": " + r.proposal.notes : ""), r.proposal.status === "invalid");
+    });
+    $("#proposals-table").addEventListener("click", (ev) => { const tr = ev.target.closest("[data-prop]"); if (tr) showProposal(Number(tr.dataset.prop)); });
+    $("#proposals-table").addEventListener("keydown", (ev) => { const tr = ev.target.closest("[data-prop]"); if (tr && ev.key === "Enter") showProposal(Number(tr.dataset.prop)); });
+    $("#pane-detail").addEventListener("click", async (ev) => {
+      const b = ev.target.closest("button"); if (!b) return;
+      if (b.dataset.propApply) { const pid = Number(b.dataset.propApply); const r = await runJob("apply", { proposal_id: pid, test: $("#apply-test").checked, commit: $("#apply-commit").checked }, "Applying #" + pid); if (r) { if (r.test_run && r.test_run.status !== "passed") toast("bad", "Tests " + r.test_run.status + "; nothing committed. Fix and commit, or revert.", true); else toast("ok", "Applied" + (r.commit_sha ? " and committed " + r.commit_sha.slice(0, 10) : "")); } await refreshAll(); showProposal(pid); return; }
+      const act = b.dataset.propReject ? "reject" : b.dataset.propRevert ? "revert" : b.dataset.propCommit ? "commit" : null; if (!act) return;
+      const pid = Number(b.dataset.propReject || b.dataset.propRevert || b.dataset.propCommit);
+      if (act === "revert" && !(await dialog("Revert proposal", "Undo proposal #" + pid + " (git revert if committed, reverse-apply otherwise)?", { ok: "Revert", danger: true }))) return;
+      try { await api("POST", rp("/proposals/" + pid + "/" + act), {}); toast("ok", act + " done"); } catch (e) { toast("bad", e.message, true); }
+      await refreshAll(); showProposal(pid);
+    });
+    document.addEventListener("keydown", (ev) => {
+      const tag = (ev.target.tagName || "").toLowerCase(); if (["input", "textarea", "select"].includes(tag) || ev.target.closest(".xterm") || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+      if (ev.key === "p") { ev.preventDefault(); $("#task").focus(); } if (ev.key === "c") { ev.preventDefault(); $("#commit-message").focus(); } if (ev.key === "t") { ev.preventDefault(); openTerminal(); } if (ev.key === "/") { ev.preventDefault(); $("#commit-filter").focus(); } if (ev.key === "?") { ev.preventDefault(); $("#help").showModal(); }
+    });
+    document.addEventListener("visibilitychange", () => { if (document.hidden) clearInterval(S.pollTimer); else startPolling(); });
+  }
+  function startPolling() { clearInterval(S.pollTimer); S.pollTimer = setInterval(() => { if (S.repoId && !document.hidden) refreshState(); }, 5000); }
+
+  // ----- boot ------------------------------------------------------------------------------
+  async function boot() {
+    S.token = readToken();
+    if (!S.token) { document.body.innerHTML = '<main class="pane"><h1>Argonauta</h1><p class="empty">This page needs the one-time link printed by <code>argonauta ui</code>. Copy that URL (with its #token) into this tab.</p></main>'; return; }
+    wire();
+    try { await loadWorkspaces(); } catch (err) { toast("bad", err.status === 401 ? "The token is not valid for this server. Re-open the URL printed by argonauta ui." : err.message, true); return; }
+    await refreshAll(); startPolling();
+  }
+  boot();
+})();
