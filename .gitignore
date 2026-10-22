@@ -1,0 +1,15 @@
+# Virtual environments and build output
+.venv/
+.venv-prod/
+dist/
+build/
+*.egg-info/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Secrets
+.env
+
+# Argonauta's own per-repository data store (private, local)
+.argonauta/
