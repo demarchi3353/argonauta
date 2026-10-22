@@ -28,6 +28,15 @@ class FakeServer:
             def log_message(self, *a):
                 pass
 
+            def do_GET(self):
+                outer.requests.append({"path": self.path, "headers": dict(self.headers), "body": None})
+                data = json.dumps(body).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
             def do_POST(self):
                 length = int(self.headers.get("Content-Length", 0))
                 outer.requests.append({"path": self.path, "headers": dict(self.headers), "body": json.loads(self.rfile.read(length))})

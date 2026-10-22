@@ -33,6 +33,7 @@
   <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></symbol>
   <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
   <symbol id="i-undo" viewBox="0 0 24 24"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/></symbol>
+  <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></symbol>
   <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></symbol>
 </svg>
 <a class="skip" href="#graph-panel">Skip to commit graph</a>
@@ -50,6 +51,7 @@
   <div class="actions" role="group" aria-label="Panels">
     <button id="btn-terminal" class="btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-terminal"/></svg>Terminal</button>
     <button id="btn-credentials" class="btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-key"/></svg>Credentials</button>
+    <button id="btn-model" class="btn" type="button" title="Which model the assistant uses"><svg class="ic" aria-hidden="true"><use href="#i-cpu"/></svg>Model</button>
     <button id="btn-help" class="btn ghost" type="button" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)"><svg class="ic" aria-hidden="true"><use href="#i-help"/></svg></button>
   </div>
 </header>
@@ -155,6 +157,33 @@
     <div class="row end">
       <button class="btn" value="cancel" type="submit">Cancel</button>
       <button class="btn primary" value="ok" id="dialog-ok" type="submit">OK</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="model-dialog" class="dialog wide">
+  <form id="model-form" method="dialog">
+    <h2>Model for the assistant</h2>
+    <p id="model-status" class="muted"></p>
+    <fieldset>
+      <legend>Local model server (OpenAI-compatible: Ollama, LM Studio, llama.cpp, vLLM)</legend>
+      <label for="model-url">Server URL</label>
+      <input id="model-url" type="url" placeholder="http://127.0.0.1:11434/v1" maxlength="2000" spellcheck="false">
+      <label class="check"><input type="checkbox" id="model-remote"> Allow a server on another machine (your task and the selected files are sent there)</label>
+      <div class="row">
+        <button class="btn" id="model-test" type="button"><svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg>Test connection</button>
+        <span id="model-test-result" class="muted" aria-live="polite"></span>
+      </div>
+      <label for="model-name">Model</label>
+      <div class="row">
+        <input id="model-name" type="text" placeholder="e.g. qwen2.5-coder:7b" maxlength="200" spellcheck="false" list="model-list">
+        <datalist id="model-list"></datalist>
+      </div>
+      <p class="muted small">On the other machine, Ollama must listen on all interfaces: <code>OLLAMA_HOST=0.0.0.0 ollama serve</code>. These values are stored in <code>~/.config/argonauta/settings.json</code>; shell variables (<code>ARGONAUTA_LOCAL_*</code>) override them.</p>
+    </fieldset>
+    <div id="model-error" class="field-error" role="alert"></div>
+    <div class="row end">
+      <button class="btn" value="cancel" type="button" id="model-cancel">Cancel</button>
+      <button class="btn primary" value="ok" type="submit" id="model-save">Save</button>
     </div>
   </form>
 </dialog>

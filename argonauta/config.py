@@ -156,11 +156,15 @@ def load_settings(repo_root: Path) -> Settings:
     has_api_key = any(os.environ.get(name, "").strip() for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"))
     override = os.environ.get("ARGONAUTA_TEST_COMMAND", "").strip() or None
 
-    local_model = os.environ.get("ARGONAUTA_LOCAL_MODEL", "").strip() or None
+    # Local model settings: shell variables win, then the user's settings file
+    # (~/.config/argonauta/settings.json, written by the web UI), then defaults.
+    user = _user_settings()
+    local_model = os.environ.get("ARGONAUTA_LOCAL_MODEL", "").strip() or user.get("local_model") or None
     if local_model and (len(local_model) > 200 or any(ch.isspace() for ch in local_model)):
         raise ConfigError("ARGONAUTA_LOCAL_MODEL must be a single model name without whitespace")
-    local_allow_remote = os.environ.get("ARGONAUTA_LOCAL_ALLOW_REMOTE", "").strip().lower() in ("1", "true", "yes", "on")
-    local_url = _local_url(os.environ.get("ARGONAUTA_LOCAL_URL", "").strip() or DEFAULT_LOCAL_URL, local_allow_remote)
+    allow_env = os.environ.get("ARGONAUTA_LOCAL_ALLOW_REMOTE", "").strip().lower()
+    local_allow_remote = allow_env in ("1", "true", "yes", "on") if allow_env else bool(user.get("local_allow_remote"))
+    local_url = _local_url(os.environ.get("ARGONAUTA_LOCAL_URL", "").strip() or user.get("local_url") or DEFAULT_LOCAL_URL, local_allow_remote)
     if provider == "local" and not local_model:
         raise ConfigError("ARGONAUTA_LOCAL_MODEL must name the model to use with the local provider (e.g. qwen2.5-coder:7b)")
 
@@ -180,6 +184,29 @@ def load_settings(repo_root: Path) -> Settings:
         local_model=local_model,
         local_allow_remote=local_allow_remote,
     )
+
+
+def _user_settings() -> dict:
+    try:
+        from argonauta.user_settings import load_user_settings
+
+        return load_user_settings()
+    except Exception:  # noqa: BLE001 - a broken settings file must not break the CLI; the UI reports it
+        return {}
+
+
+def local_setting_sources() -> dict[str, str]:
+    """Where each local-model value comes from: shell, settings or default."""
+    user = _user_settings()
+    out = {}
+    for key, env in (("local_url", "ARGONAUTA_LOCAL_URL"), ("local_model", "ARGONAUTA_LOCAL_MODEL"), ("local_allow_remote", "ARGONAUTA_LOCAL_ALLOW_REMOTE")):
+        if os.environ.get(env, "").strip():
+            out[key] = "shell"
+        elif user.get(key):
+            out[key] = "settings"
+        else:
+            out[key] = "default"
+    return out
 
 
 def _local_url(raw: str, allow_remote: bool) -> str:

@@ -646,3 +646,73 @@ def delete_terminal(ctx, params, query, body):
         raise ApiError(404, "terminal not found")
     ctx.terminals.remove(session.id)
     return 200, {"ok": True}
+
+
+# ----- user-level model settings ------------------------------------------------------------
+from argonauta.config import ConfigError, local_setting_sources  # noqa: E402
+from argonauta.user_settings import UserSettingsError, load_user_settings, save_user_settings, validate_local_url  # noqa: E402
+
+
+def _model_settings_payload(ctx: Any) -> dict:
+    import os
+
+    try:
+        settings = load_settings(Path.cwd())
+    except ConfigError as exc:
+        raise ApiError(400, str(exc)) from exc
+    return {
+        "effective_provider": settings.effective_provider,
+        "provider": describe_provider(settings),
+        "anthropic_key_present": settings.has_api_key,
+        "local_url": settings.local_url,
+        "local_model": settings.local_model,
+        "local_allow_remote": settings.local_allow_remote,
+        "local_api_key_present": bool(os.environ.get("ARGONAUTA_LOCAL_API_KEY", "").strip()),
+        "sources": local_setting_sources(),
+    }
+
+
+@route("GET", r"^/api/settings/model$")
+def get_model_settings(ctx, params, query, body):
+    return 200, _model_settings_payload(ctx)
+
+
+@route("PUT", r"^/api/settings/model$")
+def put_model_settings(ctx, params, query, body):
+    values = {
+        "local_url": require_str(body, "local_url", 2000, allow_empty=True),
+        "local_model": require_str(body, "local_model", 200, allow_empty=True),
+        "local_allow_remote": require_bool(body, "local_allow_remote", False),
+    }
+    try:
+        with ctx.lock:
+            save_user_settings(values)
+    except UserSettingsError as exc:
+        raise ApiError(400, str(exc)) from exc
+    log.info("model settings updated")
+    return 200, _model_settings_payload(ctx)
+
+
+@route("POST", r"^/api/settings/model/test$")
+def test_model_connection(ctx, params, query, body):
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    url = require_str(body, "local_url", 2000)
+    allow_remote = require_bool(body, "local_allow_remote", False)
+    try:
+        base = validate_local_url(url, allow_remote)
+    except UserSettingsError as exc:
+        raise ApiError(400, str(exc)) from exc
+    request = urllib.request.Request(base + "/models", headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310 - scheme validated above
+            data = _json.loads(response.read(1_000_000).decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        return 200, {"ok": False, "error": f"the server answered HTTP {exc.code} for {base}/models", "models": []}
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        return 200, {"ok": False, "error": f"could not reach {base}: {getattr(exc, 'reason', exc)}", "models": []}
+    items = data.get("data") if isinstance(data, dict) else None
+    models = [m["id"] for m in items if isinstance(m, dict) and isinstance(m.get("id"), str)] if isinstance(items, list) else []
+    return 200, {"ok": True, "error": None, "models": models[:200]}

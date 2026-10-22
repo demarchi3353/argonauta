@@ -65,6 +65,9 @@ settings live.
 | `ARGONAUTA_PROVIDER` | `auto` | `auto`, `anthropic`, `local`, `manual`, or `scripted` (test only). Shell only. |
 | `ARGONAUTA_LOCAL_URL` | `http://127.0.0.1:11434/v1` | Base URL of the OpenAI-compatible API. Loopback only unless allowed. Shell only. |
 | `ARGONAUTA_LOCAL_ALLOW_REMOTE` | unset | Set to `1` to allow a non-loopback `ARGONAUTA_LOCAL_URL`. Shell only. |
+
+The local-model values can also be set in the web UI ("Model" button); those
+live in `~/.config/argonauta/settings.json` and shell variables override them.
 | `ARGONAUTA_TEST_COMMAND` | unset | Overrides the test command saved by `init`. Shell only. |
 | `ARGONAUTA_CONFIG_DIR` | `~/.config/argonauta` | Where the workspace registry lives. Shell only. |
 
@@ -251,13 +254,26 @@ argonauta status                                   # provider: local (qwen2.5-co
 argonauta propose "Make power() handle negative exponents"
 ```
 
+In the web UI, the **Model** button in the top bar opens a dialog where you
+set the server URL and the model name, test the connection (it lists the
+models the server offers) and save. The values go to
+`~/.config/argonauta/settings.json`, your own file outside any repository;
+shell variables still win over it and are shown as read-only there.
+
+The server may be on another machine, for example a PC with a GPU on your
+LAN: tick "allow a server on another machine" and use its address, such as
+`http://192.168.0.10:11434/v1`. On that machine Ollama must listen on all
+interfaces (`OLLAMA_HOST=0.0.0.0 ollama serve`). Be aware of what that means:
+the task and the selected files are sent to that machine, over plain HTTP
+unless you put TLS in front of it.
+
 LM Studio listens on `http://127.0.0.1:1234/v1`, llama.cpp server and vLLM on
-`http://127.0.0.1:8080/v1` and `http://127.0.0.1:8000/v1` by default; set
-`ARGONAUTA_LOCAL_URL` in your shell accordingly. The request carries the same
-content as for the Anthropic provider (system prompt, task, repository summary,
-selected files) and is sent only to that URL, which must be a loopback address
-unless you set `ARGONAUTA_LOCAL_ALLOW_REMOTE=1` in your shell on purpose. The
-reply goes through the same diff extraction and validation as any other.
+`http://127.0.0.1:8080/v1` and `http://127.0.0.1:8000/v1` by default. From the
+shell, `ARGONAUTA_LOCAL_URL` and `ARGONAUTA_LOCAL_ALLOW_REMOTE=1` do the same
+as the dialog. The request carries the same content as for the Anthropic
+provider (system prompt, task, repository summary, selected files) and is sent
+only to that URL. The reply goes through the same diff extraction and
+validation as any other.
 
 Small local models produce rougher diffs than large hosted ones. Argonauta
 tolerates the two common defects: hunk headers with wrong line counts (git is
@@ -382,7 +398,9 @@ Data model (one SQLite file per repository):
   (SQLite, WAL mode), `argonauta.log`, and `prompts/` for manual-mode bundles.
   Delete the folder to remove every trace; the repository itself is untouched.
 - The workspace registry lives in `~/.config/argonauta/workspaces.json` (names
-  and paths only). Delete it to forget every workspace.
+  and paths only) and the model settings in `~/.config/argonauta/settings.json`
+  (server URL, model name, the remote-server flag; never a key). Delete them to
+  forget every workspace and setting.
 - `argonauta export backup.json` writes all proposals, changes, test runs,
   events, settings and index metadata (paths and hashes, never file contents) as
   plain JSON. Diffs are included because they are your work.
@@ -439,7 +457,7 @@ guess and asks for `--yes` instead of hanging.
 
 ## Tests
 
-`scripts/test.sh` runs 137 tests against real git repositories, a real server
+`scripts/test.sh` runs 142 tests against real git repositories, a real server
 thread and real pty shells, not mocks:
 
 - core: store round trips and cascade deletes, diff extraction and path

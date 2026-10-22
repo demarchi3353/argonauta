@@ -314,6 +314,40 @@
   }
   window.addEventListener("resize", () => S.terminals.forEach((e) => { if (!e.pane.hidden) e.fit.fit(); }));
 
+  // ----- model settings (user-level, ~/.config/argonauta/settings.json) ------------------
+  async function openModelDialog() {
+    const d = $("#model-dialog"), err = $("#model-error"), res = $("#model-test-result");
+    err.textContent = ""; res.textContent = ""; $("#model-list").innerHTML = "";
+    let cur;
+    try { cur = await api("GET", "/api/settings/model"); } catch (e) { toast("bad", e.message, true); return; }
+    $("#model-url").value = cur.local_url || ""; $("#model-name").value = cur.local_model || ""; $("#model-remote").checked = !!cur.local_allow_remote;
+    const src = cur.sources || {};
+    const shellBound = Object.keys(src).filter((k) => src[k] === "shell");
+    $("#model-status").textContent = "Active now: " + cur.provider + (cur.anthropic_key_present ? " (an Anthropic key is set, so it takes precedence over the local model)" : "") + (shellBound.length ? ". Set in your shell and read-only here: " + shellBound.join(", ") : "");
+    $("#model-url").disabled = src.local_url === "shell"; $("#model-name").disabled = src.local_model === "shell"; $("#model-remote").disabled = src.local_allow_remote === "shell";
+    d.showModal(); $("#model-url").focus();
+  }
+  async function testModelConnection() {
+    const res = $("#model-test-result"), btn = $("#model-test");
+    res.textContent = "testing…"; btn.disabled = true;
+    try {
+      const r = await api("POST", "/api/settings/model/test", { local_url: $("#model-url").value.trim() || "http://127.0.0.1:11434/v1", local_allow_remote: $("#model-remote").checked });
+      if (r.ok) {
+        res.textContent = "✓ reachable, " + r.models.length + " model(s)";
+        $("#model-list").innerHTML = r.models.map((m) => '<option value="' + esc(m) + '">').join("");
+        if (!$("#model-name").value && r.models.length) $("#model-name").value = r.models[0];
+      } else res.textContent = "✗ " + r.error;
+    } catch (e) { res.textContent = "✗ " + e.message; } finally { btn.disabled = false; }
+  }
+  async function saveModelSettings(ev) {
+    ev.preventDefault();
+    const err = $("#model-error"); err.textContent = "";
+    try {
+      const r = await api("PUT", "/api/settings/model", { local_url: $("#model-url").value, local_model: $("#model-name").value, local_allow_remote: $("#model-remote").checked });
+      $("#model-dialog").close(); toast("ok", "Model settings saved. Active provider: " + r.provider, true); await refreshState();
+    } catch (e) { err.textContent = e.message; }
+  }
+
   // ----- tabs ------------------------------------------------------------------------------
   function selectTab(region, name) {
     if (region === "right") {
@@ -355,6 +389,10 @@
     $("#btn-terminal").addEventListener("click", openTerminal);
     $("#btn-credentials").addEventListener("click", showCredentials);
     $("#btn-help").addEventListener("click", () => $("#help").showModal());
+    $("#btn-model").addEventListener("click", openModelDialog);
+    $("#model-test").addEventListener("click", testModelConnection);
+    $("#model-form").addEventListener("submit", saveModelSettings);
+    $("#model-cancel").addEventListener("click", () => $("#model-dialog").close());
     $$(".right .tab").forEach((t) => t.addEventListener("click", () => { if (t.dataset.tab === "credentials") showCredentials(); else selectTab("right", "detail"); }));
     $("#bottom-tabs").addEventListener("click", (ev) => { const t = ev.target.closest(".tab"); if (t && !ev.target.classList.contains("close")) selectTab("bottom", t.dataset.tab); });
     $("#branch-list").addEventListener("click", async (ev) => {
