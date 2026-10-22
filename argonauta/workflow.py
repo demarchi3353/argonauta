@@ -23,6 +23,7 @@ from argonauta.runner import RunnerError, run_tests
 
 MAX_TASK_CHARS = 4000
 TEST_COMMAND_KEY = "test_command"
+LENIENT_NOTE = "applied with reduced context matching (git apply -C1): the diff's line numbers or context did not match exactly; review it"
 log = get_logger()
 
 
@@ -166,10 +167,12 @@ def propose(
         status = "invalid"
         notes = "; ".join(validation.errors)
     else:
-        apply_problem = gitops.apply_check(settings.repo_root, parsed.diff)
-        if apply_problem:
+        mode, apply_problem = gitops.apply_mode(settings.repo_root, parsed.diff)
+        if mode is None:
             status = "invalid"
             notes = f"does not apply cleanly: {apply_problem}"
+        elif mode == "lenient":
+            notes = LENIENT_NOTE
     proposal = store.create_proposal(
         task=task,
         provider=provider_name,
@@ -222,14 +225,16 @@ def apply_proposal(
     dirty = _dirty_paths(settings.repo_root, [p for p in validation.paths if (settings.repo_root / p).exists()])
     if dirty:
         raise WorkflowError("These files have uncommitted changes; commit or stash them first: " + ", ".join(dirty))
-    problem = gitops.apply_check(settings.repo_root, proposal.diff)
-    if problem:
+    mode, problem = gitops.apply_mode(settings.repo_root, proposal.diff)
+    if mode is None:
         store.update_proposal_status(proposal.id, "invalid", f"does not apply cleanly: {problem}")
         raise WorkflowError(f"The diff no longer applies cleanly: {problem}")
+    if mode == "lenient" and LENIENT_NOTE not in proposal.notes:
+        store.update_proposal_status(proposal.id, proposal.status, (proposal.notes + "; " if proposal.notes else "") + LENIENT_NOTE)
 
     if on_progress:
         on_progress("applying diff")
-    gitops.apply_diff(settings.repo_root, proposal.diff)
+    gitops.apply_diff(settings.repo_root, proposal.diff, lenient=(mode == "lenient"))
     change = store.create_change(
         proposal_id=proposal.id,
         files=validation.paths,
@@ -345,10 +350,10 @@ def revert_proposal(settings: Settings, store: Store, proposal_id: int) -> tuple
         except gitops.GitError as exc:
             raise WorkflowError(f"git revert failed: {exc}") from exc
     else:
-        problem = gitops.apply_check(settings.repo_root, proposal.diff, reverse=True)
-        if problem:
+        mode, problem = gitops.apply_mode(settings.repo_root, proposal.diff, reverse=True)
+        if mode is None:
             raise WorkflowError(f"The diff cannot be reversed cleanly (files changed since apply?): {problem}")
-        gitops.apply_diff(settings.repo_root, proposal.diff, reverse=True)
+        gitops.apply_diff(settings.repo_root, proposal.diff, reverse=True, lenient=(mode == "lenient"))
     store.mark_change_reverted(change.id)
     store.update_proposal_status(proposal.id, "reverted")
     store.record_event("revert", f"reverted change {change.id}" + (f" with commit {new_sha[:10]}" if new_sha else ""), "changes", change.id)

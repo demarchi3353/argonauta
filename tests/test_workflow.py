@@ -160,3 +160,26 @@ def test_sample_proposals_cannot_be_applied(ready):
     with pytest.raises(WorkflowError, match="Sample"):
         apply_proposal(settings, store, sample.id)
     assert clear_samples(store)["proposals"] == 3
+
+
+def test_sloppy_context_diffs_are_accepted_with_a_note(ready, tmp_path):
+    settings, store = ready
+    # Right change, wrong line numbers and an invented outer context line: what small
+    # models produce. Only the context line adjacent to the change is real.
+    sloppy = ("diff --git a/calc/core.py b/calc/core.py\n--- a/calc/core.py\n+++ b/calc/core.py\n"
+              "@@ -40,5 +40,7 @@\n     return a / b  # not what the file says here\n \n"
+              " def power(base: float, exponent: int) -> float:\n"
+              "+    if exponent < 0:\n+        return 1.0 / power(base, -exponent)\n     result = 1.0\n")
+    path = tmp_path / "sloppy.diff"
+    path.write_text(sloppy)
+    p = propose(settings, store, "negative exponents", from_diff=path).proposal
+    assert p.status == "proposed" and "reduced context" in p.notes
+    result = apply_proposal(settings, store, p.id)
+    assert result.test_run.status == "passed" and result.commit_sha
+    assert "if exponent < 0" in (settings.repo_root / "calc" / "core.py").read_text()
+
+
+def test_clean_diffs_carry_no_context_note(ready):
+    settings, store = ready
+    p = propose(settings, store, "power negative").proposal
+    assert p.status == "proposed" and p.notes == ""

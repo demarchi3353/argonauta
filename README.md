@@ -259,9 +259,15 @@ selected files) and is sent only to that URL, which must be a loopback address
 unless you set `ARGONAUTA_LOCAL_ALLOW_REMOTE=1` in your shell on purpose. The
 reply goes through the same diff extraction and validation as any other.
 
-Small local models produce more invalid diffs than large hosted ones; those
-are stored as `invalid` with the model's explanation, and the context caps keep
-prompts within what a 7B model handles well.
+Small local models produce rougher diffs than large hosted ones. Argonauta
+tolerates the two common defects: hunk headers with wrong line counts (git is
+asked to recount them from the hunk body) and context lines that do not match
+exactly (a second attempt matches only the line next to each change, and the
+proposal is marked "applied with reduced context matching" so you know to
+read it closely). Diffs that still do not apply are stored as `invalid` with
+the model's explanation. Tested with `qwen2.5-coder:7b` on Ollama: a proposal
+takes one to two minutes on an Apple-silicon laptop, and the tests gate the
+commit as usual.
 
 ## Degraded mode (no API key)
 
@@ -433,7 +439,7 @@ guess and asks for `--yes` instead of hanging.
 
 ## Tests
 
-`scripts/test.sh` runs 134 tests against real git repositories, a real server
+`scripts/test.sh` runs 137 tests against real git repositories, a real server
 thread and real pty shells, not mocks:
 
 - core: store round trips and cascade deletes, diff extraction and path

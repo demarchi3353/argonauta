@@ -108,11 +108,17 @@ def ls_files(repo_root: Path) -> list[str]:
     return [p for p in proc.stdout.split("\0") if p]
 
 
-def apply_check(repo_root: Path, diff_text: str, reverse: bool = False) -> str | None:
+# --recount: trust the hunk bodies, not the line counts in the headers, which
+# small local models frequently get wrong. "lenient" additionally matches
+# only one context line on each side (-C1) for diffs whose context is sloppy;
+# callers record that choice on the proposal so the user can see it.
+_APPLY_BASE = ["--recount", "--whitespace=nowarn"]
+LENIENT_ARGS = ["-C1"]
+
+
+def apply_check(repo_root: Path, diff_text: str, reverse: bool = False, lenient: bool = False) -> str | None:
     """Return None when the diff applies cleanly, else git's explanation."""
-    # --recount: trust the hunk bodies, not the line counts in the headers,
-    # which small local models frequently get wrong.
-    args = ["apply", "--check", "--recount", "--whitespace=nowarn"]
+    args = ["apply", "--check", *_APPLY_BASE, *(LENIENT_ARGS if lenient else [])]
     if reverse:
         args.append("-R")
     proc = run_git(repo_root, *args, "-", check=False, input_text=diff_text)
@@ -121,8 +127,18 @@ def apply_check(repo_root: Path, diff_text: str, reverse: bool = False) -> str |
     return (proc.stderr or proc.stdout).strip() or "git apply --check failed"
 
 
-def apply_diff(repo_root: Path, diff_text: str, reverse: bool = False) -> None:
-    args = ["apply", "--recount", "--whitespace=nowarn"]
+def apply_mode(repo_root: Path, diff_text: str, reverse: bool = False) -> tuple[str | None, str | None]:
+    """Pick the strictest way the diff applies: ("strict"|"lenient"|None, error)."""
+    problem = apply_check(repo_root, diff_text, reverse=reverse)
+    if problem is None:
+        return "strict", None
+    if apply_check(repo_root, diff_text, reverse=reverse, lenient=True) is None:
+        return "lenient", None
+    return None, problem
+
+
+def apply_diff(repo_root: Path, diff_text: str, reverse: bool = False, lenient: bool = False) -> None:
+    args = ["apply", *_APPLY_BASE, *(LENIENT_ARGS if lenient else [])]
     if reverse:
         args.append("-R")
     args.append("-")
