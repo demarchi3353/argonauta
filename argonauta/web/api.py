@@ -411,3 +411,238 @@ def remote_job(ctx, params, query, body):
         return {"output": out[-4000:]}
 
     return submit_job(ctx, repo, kind, run)
+
+
+# ----- assistant --------------------------------------------------------------------------
+from argonauta import workflow  # noqa: E402
+from argonauta.providers import ProviderUnavailable  # noqa: E402
+from argonauta.runner import RunnerError, parse_command  # noqa: E402
+from argonauta.web import credentials as credentials_mod  # noqa: E402
+from argonauta.web.terminal import TerminalError  # noqa: E402
+
+
+def _wf(fn: Callable[[], Any]) -> Any:
+    try:
+        return fn()
+    except workflow.ValidationError as exc:
+        raise ApiError(400, str(exc)) from exc
+    except (workflow.WorkflowError, StoreError) as exc:
+        raise ApiError(409, str(exc)) from exc
+    except gitops.GitError as exc:
+        raise ApiError(409, str(exc)) from exc
+
+
+def _proposal_payload(store: Store, pid: int) -> dict:
+    proposal = store.get_proposal(pid)
+    change = store.change_for_proposal(pid)
+    runs = store.list_test_runs(pid, limit=10)
+    return {"proposal": jsonable(proposal), "change": jsonable(change), "test_runs": jsonable(runs)}
+
+
+@route("POST", rf"^/api/repos/(?P<rid>{ID})/init$")
+def init_repo(ctx, params, query, body):
+    repo = resolve_repo(ctx, params["rid"])
+    command = require_str(body, "test_command", 1000, allow_empty=True).strip() or None
+    settings = repo_settings(repo)
+    store = _wf(lambda: workflow.init_repo(settings, command))
+    store.close()
+    return 201, repo.to_dict()
+
+
+@route("GET", rf"^/api/repos/(?P<rid>{ID})/settings$")
+def get_settings(ctx, params, query, body):
+    repo = resolve_repo(ctx, params["rid"])
+    settings = repo_settings(repo)
+    store = open_store(repo)
+    try:
+        return 200, {"test_command": workflow.test_command_for(settings, store), "override_active": settings.test_command_override is not None, "provider": describe_provider(settings), "model": settings.model, "effort": settings.effort}
+    finally:
+        store.close()
+
+
+@route("PUT", rf"^/api/repos/(?P<rid>{ID})/settings$")
+def put_settings(ctx, params, query, body):
+    repo = resolve_repo(ctx, params["rid"])
+    command = require_str(body, "test_command", 1000)
+    try:
+        parse_command(command)
+    except RunnerError as exc:
+        raise ApiError(400, str(exc)) from exc
+    store = open_store(repo)
+    try:
+        store.set_setting(workflow.TEST_COMMAND_KEY, command)
+        store.record_event("config", "test command updated from the web UI")
+    finally:
+        store.close()
+    return 200, {"test_command": command}
+
+
+@route("GET", rf"^/api/repos/(?P<rid>{ID})/proposals$")
+def list_proposals(ctx, params, query, body):
+    repo = resolve_repo(ctx, params["rid"])
+    store = open_store(repo)
+    try:
+        items = []
+        for p in store.list_proposals(limit=query_int(query, "limit", 50, 1, 500)):
+            change = store.change_for_proposal(p.id)
+            run = store.latest_test_run_for_proposal(p.id)
+            d = jsonable(p)
+            d["diff"] = None  # list view is light; details carry the diff
+            d["change"] = jsonable(change)
+            d["last_test"] = jsonable(run)
+            items.append(d)
+        return 200, {"proposals": items}
+    finally:
+        store.close()
+
+
+@route("GET", rf"^/api/repos/(?P<rid>{ID})/proposals/(?P<pid>\d{{1,9}})$")
+def get_proposal(ctx, params, query, body):
+    repo = resolve_repo(ctx, params["rid"])
+    store = open_store(repo)
+    try:
+        try:
+            return 200, _proposal_payload(store, int(params["pid"]))
+        except StoreError as exc:
+            raise ApiError(404, str(exc)) from exc
+    finally:
+        store.close()
+
+
+@route("POST", rf"^/api/repos/(?P<rid>{ID})/proposals/(?P<pid>\d{{1,9}})/(?P<action>reject|revert|commit)$")
+def proposal_action(ctx, params, query, body):
+    repo = resolve_repo(ctx, params["rid"])
+    pid = int(params["pid"])
+    settings = repo_settings(repo)
+    store = open_store(repo)
+    try:
+        try:
+            store.get_proposal(pid)
+        except StoreError as exc:
+            raise ApiError(404, str(exc)) from exc
+        action = params["action"]
+        if action == "reject":
+            _wf(lambda: workflow.reject_proposal(store, pid, require_str(body, "reason", 500, allow_empty=True).strip()))
+        elif action == "revert":
+            _wf(lambda: workflow.revert_proposal(settings, store, pid))
+        else:
+            _wf(lambda: workflow.commit_change(settings, store, pid))
+        return 200, _proposal_payload(store, pid)
+    finally:
+        store.close()
+
+
+@route("GET", rf"^/api/repos/(?P<rid>{ID})/events$")
+def list_events(ctx, params, query, body):
+    repo = resolve_repo(ctx, params["rid"])
+    store = open_store(repo)
+    try:
+        return 200, {"events": jsonable(store.list_events(limit=query_int(query, "limit", 100, 1, 1000)))}
+    finally:
+        store.close()
+
+
+@route("POST", rf"^/api/repos/(?P<rid>{ID})/jobs/(?P<kind>index|propose|test|apply)$")
+def assistant_job(ctx, params, query, body):
+    from argonauta.indexer import index_repo
+
+    repo = resolve_repo(ctx, params["rid"])
+    kind = params["kind"]
+    if not repo.initialized:
+        raise ApiError(409, "repository is not initialised; run init first")
+    settings = repo_settings(repo)
+    db_path = repo.path / ".argonauta" / "argonauta.db"
+
+    task = ""
+    dry_run = False
+    pid = 0
+    pid_opt: int | None = None
+    run_tests = do_commit = True
+    if kind == "propose":
+        task = _wf(lambda: workflow.validate_task(require_str(body, "task", workflow.MAX_TASK_CHARS)))
+        dry_run = require_bool(body, "dry_run", False)
+    elif kind == "apply":
+        raw_pid = body.get("proposal_id")
+        if not isinstance(raw_pid, int) or isinstance(raw_pid, bool) or raw_pid <= 0:
+            raise ApiError(400, "proposal_id must be a positive integer")
+        pid = raw_pid
+        run_tests = require_bool(body, "test", True)
+        do_commit = require_bool(body, "commit", True)
+    elif kind == "test":
+        pid_opt = body.get("proposal_id")
+        if pid_opt is not None and (not isinstance(pid_opt, int) or isinstance(pid_opt, bool) or pid_opt <= 0):
+            raise ApiError(400, "proposal_id must be a positive integer")
+
+    def run(progress):
+        store = Store.open(db_path)
+        try:
+            if kind == "index":
+                progress("indexing")
+                stats = index_repo(store, repo.path, lambda n, total: progress(f"indexing {n}/{total}"))
+                store.record_event("index", f"indexed {stats.indexed}, unchanged {stats.unchanged}, removed {stats.removed}, skipped {stats.skipped}")
+                return {"stats": jsonable(stats), "file_count": store.file_count()}
+            if kind == "propose":
+                try:
+                    outcome = workflow.propose(settings, store, task, dry_run=dry_run, on_progress=progress)
+                except ProviderUnavailable as exc:
+                    return {"manual": True, "message": str(exc), "context": []}
+                return {
+                    "manual": False,
+                    "dry_run": dry_run,
+                    "context": outcome.context.paths,
+                    "skipped": outcome.context.skipped,
+                    "proposal": jsonable(outcome.proposal),
+                    "validation": {"ok": outcome.validation.ok, "errors": outcome.validation.errors, "files": outcome.validation.paths} if outcome.validation else None,
+                }
+            if kind == "apply":
+                result = workflow.apply_proposal(settings, store, pid, run_tests_after=run_tests, commit_after=do_commit, on_progress=progress)
+                return {"proposal": jsonable(result.proposal), "change": jsonable(result.change), "test_run": jsonable(result.test_run), "commit_sha": result.commit_sha, "skipped_commit_reason": result.skipped_commit_reason}
+            progress("running tests")
+            run_result = workflow.run_tests_now(settings, store, pid_opt)
+            return {"test_run": jsonable(run_result)}
+        finally:
+            store.close()
+
+    return submit_job(ctx, repo, kind, run)
+
+
+# ----- credentials --------------------------------------------------------------------------
+@route("GET", rf"^/api/repos/(?P<rid>{ID})/credentials$")
+def get_credentials(ctx, params, query, body):
+    repo = resolve_repo(ctx, params["rid"])
+    return 200, credentials_mod.inspect(repo.path)
+
+
+# ----- terminals ----------------------------------------------------------------------------
+def _size(body: dict, key: str, default: int) -> int:
+    value = body.get(key, default)
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise ApiError(400, f"{key} must be a positive integer")
+    return value
+
+
+@route("POST", rf"^/api/repos/(?P<rid>{ID})/terminals$")
+def create_terminal(ctx, params, query, body):
+    repo = resolve_repo(ctx, params["rid"])
+    cols, rows = _size(body, "cols", 80), _size(body, "rows", 24)
+    try:
+        session = ctx.terminals.create(repo.path, cols, rows)
+    except TerminalError as exc:
+        raise ApiError(409, str(exc)) from exc
+    record_event(repo, "terminal.open", f"terminal {session.id} opened")
+    return 201, {"terminal": session.to_dict()}
+
+
+@route("GET", rf"^/api/repos/(?P<rid>{ID})/terminals$")
+def list_terminals(ctx, params, query, body):
+    repo = resolve_repo(ctx, params["rid"])
+    return 200, {"terminals": [t.to_dict() for t in ctx.terminals.list_for(repo.path)]}
+
+
+@route("DELETE", rf"^/api/terminals/(?P<tid>{ID})$")
+def delete_terminal(ctx, params, query, body):
+    session = ctx.terminals.get(params["tid"])
+    if session is None:
+        raise ApiError(404, "terminal not found")
+    ctx.terminals.remove(session.id)
+    return 200, {"ok": True}
