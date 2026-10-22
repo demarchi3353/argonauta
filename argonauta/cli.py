@@ -597,12 +597,12 @@ def config_show() -> None:
 @config_app.command("set-test-command")
 def config_set_test_command(command: Annotated[str, typer.Argument(help='e.g. "python -m pytest -q"')]) -> None:
     """Store the command that `apply` and `test` run."""
-    from argonauta.runner import RunnerError, parse_command
+    from argonauta.runner import RunnerError, check_command
     from argonauta.workflow import TEST_COMMAND_KEY
 
     settings = _settings()
     try:
-        parse_command(command)
+        check_command(command)
     except RunnerError as exc:
         console_ui.failure(str(exc))
         raise typer.Exit(EXIT_INVALID)

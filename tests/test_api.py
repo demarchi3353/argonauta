@@ -356,3 +356,11 @@ def test_checkout_rejects_file_paths_and_add_repo_rejects_files(api, tmp_path):
     assert status == 409 and (repo.path / "README.md").read_text() == "local edit\n"
     status, data = api.post(f"/api/workspaces/{api.workspace.id}/repos", {"path": str(repo.path / "README.md")})
     assert status == 400
+
+
+def test_settings_reject_unresolvable_test_command(api):
+    r = f"/api/repos/{api.repo.id}"
+    assert api.post(f"{r}/init", {"test_command": "definitely-not-a-real-binary -q"})[0] == 400
+    api.post(f"{r}/init")
+    status, data = api.request("PUT", f"{r}/settings", {"test_command": "definitely-not-a-real-binary -q"})
+    assert status == 400 and "command not found" in data["error"]

@@ -416,7 +416,7 @@ def remote_job(ctx, params, query, body):
 # ----- assistant --------------------------------------------------------------------------
 from argonauta import workflow  # noqa: E402
 from argonauta.providers import ProviderUnavailable  # noqa: E402
-from argonauta.runner import RunnerError, parse_command  # noqa: E402
+from argonauta.runner import RunnerError, check_command  # noqa: E402
 from argonauta.web import credentials as credentials_mod  # noqa: E402
 from argonauta.web.terminal import TerminalError  # noqa: E402
 
@@ -465,7 +465,7 @@ def put_settings(ctx, params, query, body):
     repo = resolve_repo(ctx, params["rid"])
     command = require_str(body, "test_command", 1000)
     try:
-        parse_command(command)
+        check_command(command)
     except RunnerError as exc:
         raise ApiError(400, str(exc)) from exc
     store = open_store(repo)

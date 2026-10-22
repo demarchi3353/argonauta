@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass
@@ -42,6 +43,24 @@ def parse_command(command: str) -> list[str]:
         raise RunnerError(f"could not parse the test command: {exc}") from exc
     if not argv:
         raise RunnerError("the test command is empty")
+    return argv
+
+
+def check_command(command: str) -> list[str]:
+    """Parse the command and make sure its executable can be found.
+
+    Catches the classic "python -m pytest" on a machine that only has python3
+    at configuration time instead of at apply time.
+    """
+    argv = parse_command(command)
+    exe = argv[0]
+    resolvable = shutil.which(exe) is not None or (os.path.sep in exe and os.path.isfile(os.path.expanduser(exe)) and os.access(os.path.expanduser(exe), os.X_OK))
+    if not resolvable:
+        hint = ""
+        if exe in ("python", "py"):
+            rest = " ".join(argv[1:])
+            hint = f" Try 'python3 {rest}' or '.venv/bin/python {rest}'.".replace("  ", " ")
+        raise RunnerError(f"command not found: {exe}.{hint}")
     return argv
 
 

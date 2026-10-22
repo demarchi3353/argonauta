@@ -58,10 +58,10 @@ def init_repo(settings: Settings, test_command: str | None) -> Store:
     if store.get_meta("repo_root") is None:
         store.set_meta("repo_root", str(settings.repo_root))
     if test_command is not None:
-        from argonauta.runner import parse_command
+        from argonauta.runner import check_command
 
         try:
-            parse_command(test_command)
+            check_command(test_command)
         except RunnerError as exc:
             raise ValidationError(str(exc)) from exc
         store.set_setting(TEST_COMMAND_KEY, test_command)

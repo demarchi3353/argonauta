@@ -476,7 +476,7 @@ guess and asks for `--yes` instead of hanging.
 
 ## Tests
 
-`scripts/test.sh` runs 142 tests against real git repositories, a real server
+`scripts/test.sh` runs 155 tests against real git repositories, a real server
 thread and real pty shells, not mocks:
 
 - core: store round trips and cascade deletes, diff extraction and path

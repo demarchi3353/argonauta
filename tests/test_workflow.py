@@ -213,3 +213,10 @@ def test_prose_only_reply_is_explained(ready, tmp_path):
     p = propose(settings, store, "review the README", from_diff=reply).proposal
     assert p.status == "invalid" and "prose" in p.notes and "nothing to apply" in p.notes
     assert "looks consistent" in p.explanation
+
+
+def test_init_rejects_a_test_command_that_cannot_run(sample_repo, monkeypatch):
+    monkeypatch.setenv("ARGONAUTA_PROVIDER", "scripted")
+    settings = load_settings(sample_repo)
+    with pytest.raises(ValidationError, match="command not found"):
+        init_repo(settings, "definitely-not-a-real-binary -q")
