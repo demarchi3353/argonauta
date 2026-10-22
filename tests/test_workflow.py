@@ -183,3 +183,33 @@ def test_clean_diffs_carry_no_context_note(ready):
     settings, store = ready
     p = propose(settings, store, "power negative").proposal
     assert p.status == "proposed" and p.notes == ""
+
+
+def test_files_named_in_the_task_lead_the_context(ready):
+    from argonauta.workflow import select_context
+
+    settings, store = ready
+    # "READ.ME" is a sloppy spelling of README.md; "calc/core.py" is an exact path.
+    sel = select_context(settings, store, "review READ.ME and calc/core.py for consistency")
+    assert sel.paths[:2] == ["README.md", "calc/core.py"]
+    assert sel.mentioned == ["README.md", "calc/core.py"]
+    sel = select_context(settings, store, "power negative exponents")
+    assert sel.mentioned == [] and "calc/core.py" in sel.paths
+
+
+def test_mentioned_file_prefers_the_shallowest_match():
+    from argonauta.workflow import files_mentioned
+
+    paths = ["README.md", "examples/README.md", "examples/sample_project/README.md", "src/a/util.py", "src/b/util.py"]
+    assert files_mentioned("review READ.ME please", paths) == ["README.md"]
+    assert files_mentioned("look at util.py", paths) == ["src/a/util.py", "src/b/util.py"]  # tie: both
+    assert files_mentioned("fix examples/README.md", paths) == ["examples/README.md"]  # exact path wins
+
+
+def test_prose_only_reply_is_explained(ready, tmp_path):
+    settings, store = ready
+    reply = tmp_path / "reply.md"
+    reply.write_text("I reviewed the file and it looks consistent. No changes needed.\n")
+    p = propose(settings, store, "review the README", from_diff=reply).proposal
+    assert p.status == "invalid" and "prose" in p.notes and "nothing to apply" in p.notes
+    assert "looks consistent" in p.explanation

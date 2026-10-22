@@ -6,6 +6,7 @@ is complete even when a step fails halfway.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -75,31 +76,68 @@ def init_repo(settings: Settings, test_command: str | None) -> Store:
 class ContextSelection:
     files: list[ContextFile] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
+    mentioned: list[str] = field(default_factory=list)  # files named in the task, sent first
 
     @property
     def paths(self) -> list[str]:
         return [f.path for f in self.files]
 
 
+_PATHISH_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./\-]*")
+
+
+def _squash(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", text.lower())
+
+
+def files_mentioned(task: str, paths: list[str]) -> list[str]:
+    """Indexed files the task names, tolerating sloppy spellings like READ.ME."""
+    by_path = {p.lower(): p for p in paths}
+    by_base: dict[str, list[str]] = {}
+    by_stem: dict[str, list[str]] = {}
+    for p in paths:
+        base = p.rsplit("/", 1)[-1].lower()
+        by_base.setdefault(base, []).append(p)
+        by_stem.setdefault(_squash(base.split(".")[0]), []).append(p)
+    found: list[str] = []
+    for token in _PATHISH_RE.findall(task):
+        tok = token.strip("./").lower()
+        if len(tok) < 3:
+            continue
+        candidates = by_path.get(tok) and [by_path[tok]] or by_base.get(tok) or by_stem.get(_squash(tok)) or []
+        if not candidates:
+            continue
+        # Several files share the name (README.md at the root and in examples/):
+        # the shallowest one is what a person means; ties keep all of them.
+        depth = min(c.count("/") for c in candidates)
+        for c in sorted(c for c in candidates if c.count("/") == depth):
+            if c not in found:
+                found.append(c)
+    return found
+
+
 def select_context(settings: Settings, store: Store, task: str) -> ContextSelection:
     selection = ContextSelection()
-    hits = search(store, task, limit=settings.max_context_files * 2)
     budget = settings.max_context_bytes
-    for hit in hits:
+    all_paths = [f.path for f in store.list_files()]
+    selection.mentioned = files_mentioned(task, all_paths)
+    hits = search(store, task, limit=settings.max_context_files * 2)
+    ordered = selection.mentioned + [h.file.path for h in hits if h.file.path not in selection.mentioned]
+    for path in ordered:
         if len(selection.files) >= settings.max_context_files:
             break
-        abs_path = settings.repo_root / hit.file.path
+        abs_path = settings.repo_root / path
         try:
             content = abs_path.read_text(encoding="utf-8", errors="replace")
         except OSError:
-            selection.skipped.append(hit.file.path)
+            selection.skipped.append(path)
             continue
         size = len(content.encode("utf-8", "replace"))
         if size > budget:
-            selection.skipped.append(hit.file.path)
+            selection.skipped.append(path)
             continue
         budget -= size
-        selection.files.append(ContextFile(path=hit.file.path, content=content))
+        selection.files.append(ContextFile(path=path, content=content))
     return selection
 
 
@@ -163,7 +201,10 @@ def propose(
     apply_problem = None
     status = "proposed"
     notes = ""
-    if not validation.ok:
+    if not parsed.diff.strip():
+        status = "invalid"
+        notes = "the reply contains no diff (the model answered in prose); nothing to apply, read its explanation"
+    elif not validation.ok:
         status = "invalid"
         notes = "; ".join(validation.errors)
     else:

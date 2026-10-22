@@ -46,3 +46,13 @@ def test_binary_and_large_files_are_skipped(sample_repo: Path, tmp_path):
     stats = index_repo(store, sample_repo)
     assert stats.skipped == 2
     store.close()
+
+
+def test_vendor_and_license_files_are_not_indexed():
+    assert should_skip("argonauta/web/static/vendor/xterm.js")
+    assert should_skip("third_party/lib.js")
+    assert should_skip("LICENSE")
+    assert should_skip("argonauta/web/static/vendor/LICENSE")
+    assert should_skip("docs/COPYING.txt")
+    assert not should_skip("argonauta/web/static/app.js")
+    assert not should_skip("src/vendor_report.py")

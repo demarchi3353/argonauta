@@ -26,11 +26,14 @@ def git(repo: Path, *args: str) -> str:
 
 
 @pytest.fixture
-def clean_env(monkeypatch):
+def clean_env(monkeypatch, tmp_path):
     for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ARGONAUTA_PROVIDER", "ARGONAUTA_SCRIPTED_DIFF",
                  "ARGONAUTA_TEST_COMMAND", "ARGONAUTA_MODEL", "ARGONAUTA_EFFORT", "ARGONAUTA_FALLBACKS",
-                 "ARGONAUTA_MAX_CONTEXT_FILES", "ARGONAUTA_MAX_CONTEXT_BYTES", "ARGONAUTA_TEST_TIMEOUT"):
+                 "ARGONAUTA_MAX_CONTEXT_FILES", "ARGONAUTA_MAX_CONTEXT_BYTES", "ARGONAUTA_TEST_TIMEOUT",
+                 "ARGONAUTA_LOCAL_URL", "ARGONAUTA_LOCAL_MODEL", "ARGONAUTA_LOCAL_ALLOW_REMOTE", "ARGONAUTA_LOCAL_API_KEY"):
         monkeypatch.delenv(name, raising=False)
+    # never read the developer's real ~/.config/argonauta (workspaces, model settings) from tests
+    monkeypatch.setenv("ARGONAUTA_CONFIG_DIR", str(tmp_path / "argonauta-config"))
     for key, value in GIT_ENV.items():
         monkeypatch.setenv(key, value)
 

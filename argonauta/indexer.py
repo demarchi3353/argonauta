@@ -18,8 +18,9 @@ from argonauta.models import IndexedFile
 
 MAX_FILE_BYTES = 512_000
 SKIP_PREFIXES = (".argonauta/", ".git/")
-SKIP_DIR_PARTS = {"node_modules", ".venv", "venv", "dist", "build", "__pycache__", ".pytest_cache", ".mypy_cache", ".tox"}
+SKIP_DIR_PARTS = {"node_modules", ".venv", "venv", "dist", "build", "__pycache__", ".pytest_cache", ".mypy_cache", ".tox", "vendor", "third_party", "thirdparty"}
 SKIP_NAMES = {".env"}
+SKIP_STEMS = {"license", "licence", "copying", "notice"}  # legal boilerplate pollutes retrieval
 
 LANGUAGES = {
     ".py": "python", ".pyi": "python", ".js": "javascript", ".mjs": "javascript", ".cjs": "javascript",
@@ -77,7 +78,9 @@ def should_skip(rel_path: str) -> bool:
     if any(p in SKIP_DIR_PARTS for p in parts[:-1]):
         return True
     name = parts[-1]
-    return name in SKIP_NAMES or name.startswith(".env.")
+    if name in SKIP_NAMES or name.startswith(".env."):
+        return True
+    return name.split(".")[0].lower() in SKIP_STEMS
 
 
 def is_binary(sample: bytes) -> bool:
