@@ -344,3 +344,12 @@ def test_terminal_create_list_delete(api):
     assert api.request("DELETE", f"/api/terminals/{tid}")[0] == 200
     assert api.get(f"{r}/terminals")[1]["terminals"] == []
     assert api.request("DELETE", f"/api/terminals/{tid}")[0] == 404
+
+
+def test_checkout_rejects_file_paths_and_add_repo_rejects_files(api, tmp_path):
+    repo = api.repo
+    (repo.path / "README.md").write_text("local edit\n")
+    status, data = api.post(f"/api/repos/{repo.id}/checkout", {"name": "README.md"})
+    assert status == 409 and (repo.path / "README.md").read_text() == "local edit\n"
+    status, data = api.post(f"/api/workspaces/{api.workspace.id}/repos", {"path": str(repo.path / "README.md")})
+    assert status == 400
