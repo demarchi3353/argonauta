@@ -13,7 +13,7 @@ from tests.test_local_provider import FakeServer
 
 def test_defaults_and_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setenv("ARGONAUTA_CONFIG_DIR", str(tmp_path))
-    assert load_user_settings() == {"local_url": None, "local_model": None, "local_allow_remote": False}
+    assert load_user_settings() == {"provider": "auto", "local_url": None, "local_model": None, "local_allow_remote": False}
     save_user_settings({"local_url": "http://192.168.0.10:11434/v1", "local_model": "qwen2.5-coder:7b", "local_allow_remote": True})
     assert stat.S_IMODE(settings_path().stat().st_mode) == 0o600
     assert load_user_settings()["local_url"] == "http://192.168.0.10:11434/v1"
@@ -75,3 +75,17 @@ def test_model_connection_test_lists_models(api, monkeypatch):
     status, data = api.post("/api/settings/model/test", {"local_url": "http://127.0.0.1:9/v1", "local_allow_remote": False})
     assert status == 200 and data["ok"] is False and "reach" in data["error"]
     assert api.post("/api/settings/model/test", {"local_url": "http://10.0.0.5:11434/v1", "local_allow_remote": False})[0] == 400
+
+
+def test_model_settings_api_reports_claude_cli_and_accepts_provider(api, monkeypatch, tmp_path):
+    import json as _json
+    from tests.test_claude_cli_provider import fake_claude
+    for name in ("ARGONAUTA_PROVIDER", "ANTHROPIC_API_KEY", "ARGONAUTA_LOCAL_MODEL"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ARGONAUTA_CLAUDE_BIN", str(fake_claude(tmp_path, _json.dumps({"loggedIn": True, "authMethod": "claude.ai"}))))
+    data = api.get("/api/settings/model")[1]
+    assert data["claude_cli"]["installed"] is True and data["claude_cli"]["logged_in"] is True and data["claude_cli"]["auth_method"] == "claude.ai"
+    assert data["provider_choice"] == "auto"
+    status, data = api.request("PUT", "/api/settings/model", {"provider": "claude-cli", "local_url": "", "local_model": "", "local_allow_remote": False})
+    assert status == 200 and data["provider_choice"] == "claude-cli" and data["effective_provider"] == "claude-cli"
+    assert api.request("PUT", "/api/settings/model", {"provider": "weird", "local_url": "", "local_model": "", "local_allow_remote": False})[0] == 400

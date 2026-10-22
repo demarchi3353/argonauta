@@ -16,6 +16,10 @@ def get_provider(settings: Settings) -> Provider:
         from argonauta.providers.local import LocalProvider
 
         return LocalProvider(settings)
+    if name == "claude-cli":
+        from argonauta.providers.claude_cli import ClaudeCliProvider
+
+        return ClaudeCliProvider(settings)
     if name == "scripted":
         from argonauta.providers.scripted import ScriptedProvider
 
@@ -31,6 +35,8 @@ def describe_provider(settings: Settings) -> str:
         return f"anthropic ({settings.model}, effort {settings.effort})"
     if name == "local":
         return f"local ({settings.local_model} at {settings.local_url}, OpenAI-compatible API)"
+    if name == "claude-cli":
+        return f"claude-cli (Claude Code CLI under your Claude subscription, model {settings.model})"
     if name == "scripted":
         return "scripted (TEST ONLY: replays a diff from a file, not a real model)"
     return "manual (degraded: no API key, you paste the diff yourself)"

@@ -19,7 +19,7 @@ PROMPTS_DIR_NAME = "prompts"
 DEFAULT_MODEL = "claude-opus-5-5"
 DEFAULT_EFFORT = "medium"
 VALID_EFFORTS = ("low", "medium", "high", "xhigh", "max")
-VALID_PROVIDERS = ("auto", "anthropic", "local", "manual", "scripted")
+VALID_PROVIDERS = ("auto", "anthropic", "local", "claude-cli", "manual", "scripted")
 SECRET_ENV_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ARGONAUTA_LOCAL_API_KEY")
 DEFAULT_LOCAL_URL = "http://127.0.0.1:11434/v1"  # Ollama's OpenAI-compatible endpoint
 LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1", "[::1]")
@@ -45,7 +45,7 @@ DOTENV_ALLOWLIST = (
 # sent when the local provider is active, so they are shell-only as well.
 # ARGONAUTA_CONFIG_DIR decides which workspace registry the web UI trusts, so a
 # cloned repository must not be able to redirect it either.
-SHELL_ONLY_VARS = ("ARGONAUTA_TEST_COMMAND", "ARGONAUTA_PROVIDER", "ARGONAUTA_SCRIPTED_DIFF", "ARGONAUTA_CONFIG_DIR", "ARGONAUTA_LOCAL_URL", "ARGONAUTA_LOCAL_ALLOW_REMOTE")
+SHELL_ONLY_VARS = ("ARGONAUTA_TEST_COMMAND", "ARGONAUTA_PROVIDER", "ARGONAUTA_SCRIPTED_DIFF", "ARGONAUTA_CONFIG_DIR", "ARGONAUTA_LOCAL_URL", "ARGONAUTA_LOCAL_ALLOW_REMOTE", "ARGONAUTA_CLAUDE_BIN")
 
 
 class ConfigError(ValueError):
@@ -130,7 +130,9 @@ def load_settings(repo_root: Path) -> Settings:
     """Build Settings for a repository, reading its .env without overriding the shell."""
     load_repo_dotenv(repo_root / ".env")
 
-    provider = os.environ.get("ARGONAUTA_PROVIDER", "auto").strip().lower() or "auto"
+    # Provider: the shell wins, then the user's settings file (written by the web UI), then auto.
+    user_pre = _user_settings()
+    provider = os.environ.get("ARGONAUTA_PROVIDER", "").strip().lower() or str(user_pre.get("provider") or "auto").lower()
     if provider not in VALID_PROVIDERS:
         raise ConfigError(
             f"ARGONAUTA_PROVIDER must be one of {', '.join(VALID_PROVIDERS)}, got {provider!r}"
@@ -199,10 +201,10 @@ def local_setting_sources() -> dict[str, str]:
     """Where each local-model value comes from: shell, settings or default."""
     user = _user_settings()
     out = {}
-    for key, env in (("local_url", "ARGONAUTA_LOCAL_URL"), ("local_model", "ARGONAUTA_LOCAL_MODEL"), ("local_allow_remote", "ARGONAUTA_LOCAL_ALLOW_REMOTE")):
+    for key, env in (("local_url", "ARGONAUTA_LOCAL_URL"), ("local_model", "ARGONAUTA_LOCAL_MODEL"), ("local_allow_remote", "ARGONAUTA_LOCAL_ALLOW_REMOTE"), ("provider", "ARGONAUTA_PROVIDER")):
         if os.environ.get(env, "").strip():
             out[key] = "shell"
-        elif user.get(key):
+        elif user.get(key) and not (key == "provider" and user.get(key) == "auto"):
             out[key] = "settings"
         else:
             out[key] = "default"

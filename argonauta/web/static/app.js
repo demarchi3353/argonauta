@@ -322,6 +322,11 @@
     try { cur = await api("GET", "/api/settings/model"); } catch (e) { toast("bad", e.message, true); return; }
     $("#model-url").value = cur.local_url || ""; $("#model-name").value = cur.local_model || ""; $("#model-remote").checked = !!cur.local_allow_remote;
     const src = cur.sources || {};
+    const choice = $$('#provider-choice input[name="provider"]').find((r) => r.value === (cur.provider_choice || "auto")) || $('#provider-choice input[value="auto"]');
+    choice.checked = true;
+    $$('#provider-choice input[name="provider"]').forEach((r) => { r.disabled = src.provider === "shell"; });
+    const cc = cur.claude_cli || {};
+    $("#claude-cli-status").textContent = !cc.installed ? "(claude not found on PATH)" : cc.logged_in === true ? "(installed, logged in" + (cc.auth_method ? " via " + cc.auth_method : "") + ")" : cc.logged_in === false ? "(installed, not logged in: run `claude auth login`)" : "(installed)";
     const shellBound = Object.keys(src).filter((k) => src[k] === "shell");
     $("#model-status").textContent = "Active now: " + cur.provider + (cur.anthropic_key_present ? " (an Anthropic key is set, so it takes precedence over the local model)" : "") + (shellBound.length ? ". Set in your shell and read-only here: " + shellBound.join(", ") : "");
     $("#model-url").disabled = src.local_url === "shell"; $("#model-name").disabled = src.local_model === "shell"; $("#model-remote").disabled = src.local_allow_remote === "shell";
@@ -343,7 +348,8 @@
     ev.preventDefault();
     const err = $("#model-error"); err.textContent = "";
     try {
-      const r = await api("PUT", "/api/settings/model", { local_url: $("#model-url").value, local_model: $("#model-name").value, local_allow_remote: $("#model-remote").checked });
+      const picked = $$('#provider-choice input[name="provider"]').find((r) => r.checked);
+      const r = await api("PUT", "/api/settings/model", { provider: picked ? picked.value : "auto", local_url: $("#model-url").value, local_model: $("#model-name").value, local_allow_remote: $("#model-remote").checked });
       $("#model-dialog").close(); toast("ok", "Model settings saved. Active provider: " + r.provider, true); await refreshState();
     } catch (e) { err.textContent = e.message; }
   }

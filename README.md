@@ -37,14 +37,19 @@ scripts/dev.sh --help      # run the CLI from source
 scripts/dev.sh ui          # run the web UI from source
 ```
 
-The assistant needs a model. Three ways, in the order `auto` tries them:
+The assistant needs a model. Four ways; `auto` tries the first two in order
+and falls back to manual:
 
-1. an Anthropic API key in `.env` (the `anthropic` provider);
-2. a model running on your machine behind an OpenAI-compatible API, such as
-   Ollama, LM Studio, llama.cpp server or vLLM (the `local` provider; see
-   "Local models" below);
-3. neither: **manual mode** (see "Degraded mode" below), which never opens a
-   network connection.
+1. an Anthropic API key in `.env` (the `anthropic` provider, pay per token);
+2. a model running on your machine or your LAN behind an OpenAI-compatible
+   API, such as Ollama, LM Studio, llama.cpp server or vLLM (the `local`
+   provider; see "Local models" below);
+3. the installed Claude Code CLI under your Claude subscription (the
+   `claude-cli` provider; chosen explicitly, see "Claude Code CLI" below);
+4. **manual mode** (see "Degraded mode" below), which never opens a network
+   connection.
+
+The **Model** button in the web UI switches between them.
 
 `.env.example` documents every variable. "Shell only" means the variable is
 ignored when it appears in a repository's `.env` and must come from your shell,
@@ -62,7 +67,8 @@ settings live.
 | `ARGONAUTA_TEST_TIMEOUT` | `600` | Seconds before a test run is killed. |
 | `ARGONAUTA_LOCAL_MODEL` | unset | Model name for the local provider, e.g. `qwen2.5-coder:7b`. |
 | `ARGONAUTA_LOCAL_API_KEY` | unset | Bearer token for local servers that require one. |
-| `ARGONAUTA_PROVIDER` | `auto` | `auto`, `anthropic`, `local`, `manual`, or `scripted` (test only). Shell only. |
+| `ARGONAUTA_PROVIDER` | `auto` | `auto`, `anthropic`, `local`, `claude-cli`, `manual`, or `scripted` (test only). Shell only. |
+| `ARGONAUTA_CLAUDE_BIN` | unset | Path to the `claude` binary when it is not on PATH. Shell only. |
 | `ARGONAUTA_LOCAL_URL` | `http://127.0.0.1:11434/v1` | Base URL of the OpenAI-compatible API. Loopback only unless allowed. Shell only. |
 | `ARGONAUTA_LOCAL_ALLOW_REMOTE` | unset | Set to `1` to allow a non-loopback `ARGONAUTA_LOCAL_URL`. Shell only. |
 
@@ -285,6 +291,18 @@ the model's explanation. Tested with `qwen2.5-coder:7b` on Ollama: a proposal
 takes one to two minutes on an Apple-silicon laptop, and the tests gate the
 commit as usual.
 
+## Claude Code CLI (your Claude subscription)
+
+If Claude Code is installed and logged in (`claude auth status`), pick
+"Claude Code CLI" in the **Model** dialog or set `ARGONAUTA_PROVIDER=claude-cli`
+in your shell. Proposals then run through `claude -p`, the CLI's documented
+headless mode, and are covered by your Claude plan instead of API credits.
+Argonauta never reads the CLI's credentials: it only starts the command, with
+tools disabled, no session persisted, no project settings loaded, in an empty
+temporary directory, and passes the same prompt the other providers get on
+stdin. Plan rate limits apply, and the CLI's own terms do too; check them if
+you rely on this.
+
 ## Degraded mode (no API key)
 
 With no key, a proposal writes a prompt bundle to `.argonauta/prompts/`
@@ -355,8 +373,8 @@ argonauta/
   diffs.py               extract / parse / validate unified diffs from untrusted text
   prompts.py             system prompt, context packing, reply parsing, manual bundle
   providers/             anthropic (SDK, streaming, adaptive thinking, refusal fallbacks),
-                         local (OpenAI-compatible API over urllib), manual (degraded),
-                         scripted (test only)
+                         local (OpenAI-compatible API over urllib), claude-cli (headless
+                         Claude Code under the user's plan), manual (degraded), scripted (test only)
   runner.py              test command execution without a shell
   workflow.py            propose -> apply -> test -> commit / revert, with audit events
   exchange.py            JSON export and validated import (merge or replace)

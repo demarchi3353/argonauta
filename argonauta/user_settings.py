@@ -15,7 +15,8 @@ from argonauta.workspaces import config_dir
 
 FILE_NAME = "settings.json"
 LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1", "[::1]")
-KEYS = ("local_url", "local_model", "local_allow_remote")
+KEYS = ("provider", "local_url", "local_model", "local_allow_remote")
+PROVIDER_CHOICES = ("auto", "anthropic", "local", "claude-cli", "manual")
 
 
 class UserSettingsError(ValueError):
@@ -28,7 +29,7 @@ def settings_path() -> Path:
 
 def load_user_settings() -> dict:
     path = settings_path()
-    data: dict = {"local_url": None, "local_model": None, "local_allow_remote": False}
+    data: dict = {"provider": "auto", "local_url": None, "local_model": None, "local_allow_remote": False}
     if not path.is_file():
         return data
     try:
@@ -42,6 +43,8 @@ def load_user_settings() -> dict:
     if isinstance(raw.get("local_model"), str) and raw["local_model"].strip():
         data["local_model"] = raw["local_model"].strip()
     data["local_allow_remote"] = raw.get("local_allow_remote") is True
+    if raw.get("provider") in PROVIDER_CHOICES:
+        data["provider"] = raw["provider"]
     return data
 
 
@@ -74,7 +77,11 @@ def save_user_settings(values: dict) -> dict:
     model = values.get("local_model")
     if model is not None and not isinstance(model, str):
         raise UserSettingsError("local_model must be a string")
+    provider = values.get("provider", "auto") or "auto"
+    if provider not in PROVIDER_CHOICES:
+        raise UserSettingsError(f"provider must be one of {', '.join(PROVIDER_CHOICES)}")
     clean = {
+        "provider": provider,
         "local_url": validate_local_url(url, allow_remote) if url and url.strip() else None,
         "local_model": validate_model(model),
         "local_allow_remote": allow_remote,

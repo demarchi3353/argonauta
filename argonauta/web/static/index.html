@@ -164,6 +164,13 @@
   <form id="model-form" method="dialog">
     <h2>Model for the assistant</h2>
     <p id="model-status" class="muted"></p>
+    <fieldset id="provider-choice">
+      <legend>Provider</legend>
+      <label class="check"><input type="radio" name="provider" value="auto"> Automatic: an Anthropic API key if present, else the local server below if a model is set, else manual</label>
+      <label class="check"><input type="radio" name="provider" value="local"> Local model server (configured below)</label>
+      <label class="check"><input type="radio" name="provider" value="claude-cli"> Claude Code CLI, under your Claude subscription <span id="claude-cli-status" class="muted small"></span></label>
+      <label class="check"><input type="radio" name="provider" value="manual"> Manual: write a prompt bundle, you paste the diff back</label>
+    </fieldset>
     <fieldset>
       <legend>Local model server (OpenAI-compatible: Ollama, LM Studio, llama.cpp, vLLM)</legend>
       <label for="model-url">Server URL</label>

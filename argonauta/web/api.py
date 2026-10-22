@@ -660,15 +660,20 @@ def _model_settings_payload(ctx: Any) -> dict:
         settings = load_settings(Path.cwd())
     except ConfigError as exc:
         raise ApiError(400, str(exc)) from exc
+    from argonauta.providers.claude_cli import auth_status
+
+    sources = local_setting_sources()
     return {
         "effective_provider": settings.effective_provider,
+        "provider_choice": settings.provider,
         "provider": describe_provider(settings),
+        "claude_cli": auth_status(),
         "anthropic_key_present": settings.has_api_key,
         "local_url": settings.local_url,
         "local_model": settings.local_model,
         "local_allow_remote": settings.local_allow_remote,
         "local_api_key_present": bool(os.environ.get("ARGONAUTA_LOCAL_API_KEY", "").strip()),
-        "sources": local_setting_sources(),
+        "sources": sources,
     }
 
 
@@ -680,6 +685,7 @@ def get_model_settings(ctx, params, query, body):
 @route("PUT", r"^/api/settings/model$")
 def put_model_settings(ctx, params, query, body):
     values = {
+        "provider": require_str(body, "provider", 32, allow_empty=True).strip() or "auto",
         "local_url": require_str(body, "local_url", 2000, allow_empty=True),
         "local_model": require_str(body, "local_model", 200, allow_empty=True),
         "local_allow_remote": require_bool(body, "local_allow_remote", False),
