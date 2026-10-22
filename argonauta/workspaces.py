@@ -39,6 +39,11 @@ class Repo:
     id: str
     path: Path
     name: str
+    parent_id: str | None = None  # set when this entry is a git worktree of another entry
+
+    @property
+    def worktree(self) -> bool:
+        return self.parent_id is not None
 
     @property
     def exists(self) -> bool:
@@ -49,7 +54,7 @@ class Repo:
         return (self.path / DATA_DIR_NAME / DB_FILE_NAME).is_file()
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "path": str(self.path), "name": self.name, "exists": self.exists, "initialized": self.initialized}
+        return {"id": self.id, "path": str(self.path), "name": self.name, "exists": self.exists, "initialized": self.initialized, "parent_id": self.parent_id, "worktree": self.worktree}
 
 
 @dataclass
@@ -96,14 +101,15 @@ class Registry:
             for r in w.get("repos", []):
                 if not isinstance(r, dict) or not all(isinstance(r.get(k), str) for k in ("id", "path", "name")):
                     raise RegistryError(f"{self.path} contains an invalid repository entry")
-                repos.append(Repo(id=r["id"], path=Path(r["path"]), name=r["name"]))
+                parent = r.get("parent_id") if isinstance(r.get("parent_id"), str) else None
+                repos.append(Repo(id=r["id"], path=Path(r["path"]), name=r["name"], parent_id=parent))
             out.append(Workspace(id=w["id"], name=w["name"], repos=repos))
         self.workspaces = out
 
     def _save_unlocked(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"version": VERSION, "workspaces": [
-            {"id": w.id, "name": w.name, "repos": [{"id": r.id, "path": str(r.path), "name": r.name} for r in w.repos]}
+            {"id": w.id, "name": w.name, "repos": [{"id": r.id, "path": str(r.path), "name": r.name, **({"parent_id": r.parent_id} if r.parent_id else {})} for r in w.repos]}
             for w in self.workspaces
         ]}
         tmp = self.path.with_suffix(".tmp")
@@ -123,6 +129,9 @@ class Registry:
                 if r.id == repo_id:
                     return r
         return None
+
+    def workspace_of(self, repo_id: str) -> Workspace | None:
+        return next((w for w in self.workspaces if any(r.id == repo_id for r in w.repos)), None)
 
     def find_repo_by_path(self, path: Path) -> Repo | None:
         resolved = path.resolve()
@@ -154,7 +163,7 @@ class Registry:
         self.workspaces.remove(ws)
         self.save()
 
-    def _add_repo_unlocked(self, workspace_id: str, path: Path) -> Repo:
+    def _add_repo_unlocked(self, workspace_id: str, path: Path, parent_id: str | None = None) -> Repo:
         ws = self.get_workspace(workspace_id)
         if ws is None:
             raise RegistryError(f"no workspace {workspace_id}")
@@ -164,16 +173,20 @@ class Registry:
             raise RegistryError(f"{path} is not inside a git repository") from exc
         if self.find_repo_by_path(top) is not None:
             raise RegistryError(f"{top} is already registered")
-        repo = Repo(id="r_" + secrets.token_hex(4), path=top, name=top.name)
+        if parent_id is not None and self.get_repo(parent_id) is None:
+            raise RegistryError(f"no repository {parent_id}")
+        repo = Repo(id="r_" + secrets.token_hex(4), path=top, name=top.name, parent_id=parent_id)
         ws.repos.append(repo)
         self.save()
         return repo
 
     def _remove_repo_unlocked(self, repo_id: str) -> None:
         for w in self.workspaces:
-            for r in w.repos:
+            for r in list(w.repos):
                 if r.id == repo_id:
                     w.repos.remove(r)
+                    for child in [c for c in w.repos if c.parent_id == repo_id]:  # its worktree entries go too
+                        w.repos.remove(child)
                     self.save()
                     return
         raise RegistryError(f"no repository {repo_id}")
@@ -208,9 +221,9 @@ class Registry:
         with self._lock:
             return self._remove_workspace_unlocked(workspace_id)
 
-    def add_repo(self, workspace_id: str, path: Path):
+    def add_repo(self, workspace_id: str, path: Path, parent_id: str | None = None):
         with self._lock:
-            return self._add_repo_unlocked(workspace_id, path)
+            return self._add_repo_unlocked(workspace_id, path, parent_id)
 
     def remove_repo(self, repo_id: str):
         with self._lock:

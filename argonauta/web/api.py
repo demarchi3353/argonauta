@@ -722,3 +722,58 @@ def test_model_connection(ctx, params, query, body):
     items = data.get("data") if isinstance(data, dict) else None
     models = [m["id"] for m in items if isinstance(m, dict) and isinstance(m.get("id"), str)] if isinstance(items, list) else []
     return 200, {"ok": True, "error": None, "models": models[:200]}
+
+
+# ----- worktrees ----------------------------------------------------------------------------
+@route("GET", rf"^/api/repos/(?P<rid>{ID})/worktrees$")
+def list_worktrees(ctx, params, query, body):
+    repo = resolve_repo(ctx, params["rid"])
+    root = ctx.registry.get_repo(repo.parent_id).path if repo.parent_id and ctx.registry.get_repo(repo.parent_id) else repo.path
+    items = []
+    for w in _git(lambda: gitops.list_worktrees(root)):
+        entry = ctx.registry.find_repo_by_path(w.path)
+        d = jsonable(w)
+        d["repo_id"] = entry.id if entry else None
+        d["name"] = w.path.name if not w.is_main else root.name
+        d["dirty"] = bool(gitops.status_entries(w.path)) if w.path.is_dir() else None
+        items.append(d)
+    return 200, {"worktrees": items, "main_repo_id": ctx.registry.find_repo_by_path(root).id if ctx.registry.find_repo_by_path(root) else None}
+
+
+@route("POST", rf"^/api/repos/(?P<rid>{ID})/worktrees$")
+def create_worktree(ctx, params, query, body):
+    repo = resolve_repo(ctx, params["rid"])
+    if repo.parent_id:
+        raise ApiError(400, "create worktrees from the main repository, not from another worktree")
+    name = require_str(body, "name", 100)
+    if not gitops.valid_worktree_name(name):
+        raise ApiError(400, "name must use letters, digits, '.', '_' or '-' and not start with '.' or '-'")
+    branch = require_str(body, "branch", 200, allow_empty=True).strip() or None
+    base = require_str(body, "base", 200, allow_empty=True).strip() or None
+    new_branch = require_bool(body, "new_branch", True)
+    if branch and not gitops.valid_branch_name(repo.path, branch):
+        raise ApiError(400, "branch is not a valid branch name")
+    if base and not (gitops.valid_branch_name(repo.path, base) or SHA_RE.match(base)):
+        raise ApiError(400, "base must be a branch name or commit sha")
+    path = _git(lambda: gitops.add_worktree(repo.path, name, branch=branch, base=base, new_branch=new_branch))
+    ws = ctx.registry.workspace_of(repo.id)
+    with ctx.lock:
+        entry = ctx.registry.add_repo(ws.id, path, parent_id=repo.id)
+    record_event(repo, "git.worktree.add", f"created worktree {name} ({branch or name})")
+    info = next((jsonable(w) for w in gitops.list_worktrees(repo.path) if w.path == path), None)
+    return 201, {"repo": entry.to_dict(), "worktree": info}
+
+
+@route("DELETE", rf"^/api/repos/(?P<rid>{ID})/worktrees/(?P<name>[A-Za-z0-9][A-Za-z0-9._-]{{0,99}})$")
+def delete_worktree(ctx, params, query, body):
+    repo = resolve_repo(ctx, params["rid"])
+    root = ctx.registry.get_repo(repo.parent_id).path if repo.parent_id and ctx.registry.get_repo(repo.parent_id) else repo.path
+    path = (root / gitops.WORKTREES_DIR / params["name"]).resolve()
+    force = query.get("force", ["0"])[0] == "1"
+    _git(lambda: gitops.remove_worktree(root, path, force=force))
+    entry = ctx.registry.find_repo_by_path(path)
+    if entry is not None:
+        with ctx.lock:
+            ctx.registry.remove_repo(entry.id)
+    record_event(repo, "git.worktree.remove", f"removed worktree {params['name']}")
+    return 200, {"ok": True}

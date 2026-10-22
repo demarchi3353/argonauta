@@ -168,3 +168,36 @@ def test_apply_accepts_diffs_with_wrong_hunk_counts(repo):
     assert (repo / "note.txt").read_text() == "one\nTWO\nthree\n"
     gitops.apply_diff(repo, miscounted, reverse=True)
     assert (repo / "note.txt").read_text() == "one\ntwo\nthree\n"
+
+
+def test_worktree_lifecycle_inside_dot_worktrees(repo):
+    assert [w.path for w in gitops.list_worktrees(repo)] == [repo.resolve()]
+    assert gitops.list_worktrees(repo)[0].is_main
+    wt = gitops.add_worktree(repo, "feature-x")  # new branch named after the worktree, from HEAD
+    assert wt == (repo / ".worktrees" / "feature-x").resolve() and (wt / "calc" / "core.py").is_file()
+    assert git(wt, "branch", "--show-current").strip() == "feature-x"
+    infos = {w.path: w for w in gitops.list_worktrees(repo)}
+    assert infos[wt].branch == "feature-x" and not infos[wt].is_main and infos[wt].head
+    assert git(repo, "status", "--porcelain").strip() == ""  # .worktrees/ is excluded, not untracked
+    with pytest.raises(gitops.GitError):
+        gitops.add_worktree(repo, "feature-x")  # already exists
+    for bad in ("", "../x", "a b", ".hidden", "-flag", "x/y"):
+        with pytest.raises(gitops.GitError):
+            gitops.add_worktree(repo, bad)
+    (wt / "note.txt").write_text("dirty\n")
+    with pytest.raises(gitops.GitError, match="uncommitted"):
+        gitops.remove_worktree(repo, wt)
+    gitops.remove_worktree(repo, wt, force=True)
+    assert not wt.exists() and [w.path for w in gitops.list_worktrees(repo)] == [repo.resolve()]
+    assert "feature-x" in git(repo, "branch").split()  # the branch survives the worktree
+
+
+def test_worktree_from_existing_branch_and_base(repo):
+    git(repo, "branch", "existing")
+    wt = gitops.add_worktree(repo, "wt-existing", branch="existing", new_branch=False)
+    assert git(wt, "branch", "--show-current").strip() == "existing"
+    base = git(repo, "rev-parse", "HEAD").strip()
+    wt2 = gitops.add_worktree(repo, "wt-new", branch="topic", base=base)
+    assert git(wt2, "branch", "--show-current").strip() == "topic"
+    gitops.remove_worktree(repo, wt)
+    gitops.remove_worktree(repo, wt2)

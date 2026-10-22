@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -507,3 +508,85 @@ def push(repo_root: Path, set_upstream: bool = False) -> str:
     if set_upstream:
         return _remote(repo_root, "push", "-u", "origin", "HEAD")
     return _remote(repo_root, "push")
+
+
+# ----- worktrees -------------------------------------------------------------------
+WORKTREES_DIR = ".worktrees"
+_WORKTREE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
+
+
+@dataclass(frozen=True)
+class WorktreeInfo:
+    path: Path
+    branch: str | None
+    head: str | None
+    is_main: bool
+    locked: bool
+    prunable: bool
+
+
+def list_worktrees(repo_root: Path) -> list[WorktreeInfo]:
+    proc = run_git(repo_root, "worktree", "list", "--porcelain")
+    out: list[WorktreeInfo] = []
+    cur: dict = {}
+    for line in proc.stdout.splitlines() + [""]:
+        if not line:
+            if cur:
+                out.append(WorktreeInfo(
+                    path=Path(cur["worktree"]).resolve(),
+                    branch=cur.get("branch", "").replace("refs/heads/", "") or None,
+                    head=(cur.get("HEAD") or "")[:7] or None,
+                    is_main=len(out) == 0,
+                    locked="locked" in cur,
+                    prunable="prunable" in cur,
+                ))
+            cur = {}
+            continue
+        key, _, value = line.partition(" ")
+        cur[key] = value
+    return out
+
+
+def valid_worktree_name(name: str) -> bool:
+    return bool(name) and bool(_WORKTREE_NAME_RE.match(name)) and ".." not in name
+
+
+def add_worktree(repo_root: Path, name: str, branch: str | None = None, base: str | None = None, new_branch: bool = True) -> Path:
+    """Create <repo>/.worktrees/<name>; by default on a new branch named after it."""
+    if not valid_worktree_name(name):
+        raise GitError(f"invalid worktree name {name!r}: use letters, digits, '.', '_' or '-'")
+    branch = branch or name
+    if not valid_branch_name(repo_root, branch):
+        raise GitError(f"invalid branch name {branch!r}")
+    if base is not None and not (valid_branch_name(repo_root, base) or re.match(r"^[0-9a-f]{7,40}$", base)):
+        raise GitError(f"invalid base {base!r}")
+    path = repo_root / WORKTREES_DIR / name
+    if path.exists():
+        raise GitError(f"{path} already exists")
+    ensure_excluded(repo_root, f"/{WORKTREES_DIR}/")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    args = ["worktree", "add"]
+    if new_branch:
+        args += ["-b", branch]
+    args += [END, str(path)]
+    if new_branch:
+        if base:
+            args.append(base)
+    else:
+        args.append(branch)
+    run_git(repo_root, *args)
+    return path.resolve()
+
+
+def remove_worktree(repo_root: Path, path: Path, force: bool = False) -> None:
+    path = Path(path).resolve()
+    known = {w.path: w for w in list_worktrees(repo_root)}
+    if path not in known or known[path].is_main:
+        raise GitError(f"{path} is not a worktree of this repository")
+    if not force and status_entries(path):
+        raise GitError("the worktree has uncommitted changes; commit them or remove with force")
+    args = ["worktree", "remove"]
+    if force:
+        args.append("--force")
+    run_git(repo_root, *args, END, str(path))
+    run_git(repo_root, "worktree", "prune", check=False)

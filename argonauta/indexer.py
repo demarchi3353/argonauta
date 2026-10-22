@@ -17,7 +17,7 @@ from argonauta.gitops import ls_files
 from argonauta.models import IndexedFile
 
 MAX_FILE_BYTES = 512_000
-SKIP_PREFIXES = (".argonauta/", ".git/")
+SKIP_PREFIXES = (".argonauta/", ".git/", ".worktrees/")
 SKIP_DIR_PARTS = {"node_modules", ".venv", "venv", "dist", "build", "__pycache__", ".pytest_cache", ".mypy_cache", ".tox", "vendor", "third_party", "thirdparty"}
 SKIP_NAMES = {".env"}
 SKIP_STEMS = {"license", "licence", "copying", "notice"}  # legal boilerplate pollutes retrieval

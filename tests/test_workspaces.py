@@ -106,3 +106,18 @@ def test_concurrent_mutations_are_serialised(registry):
     reloaded = Registry(registry.path)
     reloaded.load()
     assert len(reloaded.workspaces) == 20
+
+
+def test_worktrees_are_registered_under_their_main_repo(registry, sample_repo):
+    from argonauta import gitops
+
+    ws = registry.add_workspace("W")
+    main = registry.add_repo(ws.id, sample_repo)
+    wt_path = gitops.add_worktree(sample_repo, "feat")
+    wt = registry.add_repo(ws.id, wt_path, parent_id=main.id)
+    assert wt.parent_id == main.id and wt.path == wt_path and wt.name == "feat"
+    entry = [r for r in registry.to_dict()["workspaces"][0]["repos"] if r["id"] == wt.id][0]
+    assert entry["parent_id"] == main.id and entry["worktree"] is True
+    assert registry.find_repo_by_path(wt_path).id == wt.id
+    registry.remove_repo(main.id)  # removing the main repository drops its worktree entries too
+    assert registry.get_repo(wt.id) is None

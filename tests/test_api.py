@@ -364,3 +364,28 @@ def test_settings_reject_unresolvable_test_command(api):
     api.post(f"{r}/init")
     status, data = api.request("PUT", f"{r}/settings", {"test_command": "definitely-not-a-real-binary -q"})
     assert status == 400 and "command not found" in data["error"]
+
+
+def test_worktree_api_create_list_remove(api):
+    r = f"/api/repos/{api.repo.id}"
+    status, data = api.get(f"{r}/worktrees")
+    assert status == 200 and len(data["worktrees"]) == 1 and data["worktrees"][0]["is_main"] is True
+    assert api.post(f"{r}/worktrees", {"name": "bad name"})[0] == 400
+    status, data = api.post(f"{r}/worktrees", {"name": "feature-a"})
+    assert status == 201 and data["repo"]["parent_id"] == api.repo.id and data["repo"]["worktree"] is True
+    wt_id = data["repo"]["id"]
+    assert data["worktree"]["branch"] == "feature-a"
+    assert any(w["path"] == data["repo"]["path"] for w in api.get(f"{r}/worktrees")[1]["worktrees"])
+    # the worktree is a repository of its own: state, terminal, graph all work there
+    st = api.get(f"/api/repos/{wt_id}/state")[1]
+    assert st["branch"] == "feature-a" and st["repo"]["worktree"] is True
+    status, t = api.post(f"/api/repos/{wt_id}/terminals", {"cols": 80, "rows": 24})
+    assert status == 201 and t["terminal"]["repo_root"] == data["repo"]["path"]
+    api.request("DELETE", f"/api/terminals/{t['terminal']['id']}")
+    # a dirty worktree refuses removal unless forced
+    from pathlib import Path
+    Path(data["repo"]["path"], "dirty.txt").write_text("x\n")
+    assert api.request("DELETE", f"{r}/worktrees/feature-a")[0] == 409
+    assert api.request("DELETE", f"{r}/worktrees/feature-a?force=1")[0] == 200
+    assert api.get(f"/api/repos/{wt_id}/state")[0] == 404  # unregistered
+    assert len(api.get(f"{r}/worktrees")[1]["worktrees"]) == 1

@@ -115,7 +115,11 @@
     if (S.repoId) repoSel.value = S.repoId;
     tree.innerHTML = S.workspaces.map((w) => '<li class="ws" role="treeitem" aria-expanded="true">' + ic("i-folder") + esc(w.name) + ' <button class="btn mini ghost" data-del-ws="' + esc(w.id) + '" aria-label="Remove workspace ' + esc(w.name) + '" title="Remove workspace">' + ic("i-x") + '</button></li>' +
       (w.repos.length ? "" : '<li class="repo muted" role="treeitem"><em>empty: use “+ Repo” to add a repository</em></li>') +
-      w.repos.map((r) => '<li class="repo' + (r.id === S.repoId ? " active" : "") + (r.exists ? "" : " missing") + '" role="treeitem" tabindex="0" data-repo="' + esc(r.id) + '" title="' + esc(r.path) + '">' + ic("i-repo") + esc(r.name) + (r.exists ? "" : " (missing)") + ' <button class="btn mini ghost" data-del-repo="' + esc(r.id) + '" data-ws="' + esc(w.id) + '" aria-label="Remove repository ' + esc(r.name) + '" title="Remove from workspace">' + ic("i-x") + '</button></li>').join("")).join("");
+      w.repos.filter((r) => !r.parent_id).map((r) => '<li class="repo' + (r.id === S.repoId ? " active" : "") + (r.exists ? "" : " missing") + '" role="treeitem" tabindex="0" data-repo="' + esc(r.id) + '" title="' + esc(r.path) + '">' + ic("i-repo") + esc(r.name) + (r.exists ? "" : " (missing)") +
+        ' <button class="btn mini ghost" data-add-wt="' + esc(r.id) + '" aria-label="New worktree of ' + esc(r.name) + '" title="New worktree: a separate checkout with its own terminal">' + ic("i-plus") + ic("i-worktree") + '</button>' +
+        '<button class="btn mini ghost" data-del-repo="' + esc(r.id) + '" data-ws="' + esc(w.id) + '" aria-label="Remove repository ' + esc(r.name) + '" title="Remove from workspace">' + ic("i-x") + '</button></li>' +
+        w.repos.filter((c) => c.parent_id === r.id).map((c) => '<li class="repo wt' + (c.id === S.repoId ? " active" : "") + (c.exists ? "" : " missing") + '" role="treeitem" tabindex="0" data-repo="' + esc(c.id) + '" title="Worktree at ' + esc(c.path) + '">' + ic("i-worktree") + esc(c.name) + (c.exists ? "" : " (missing)") +
+          ' <button class="btn mini ghost" data-del-wt="' + esc(c.name) + '" data-main="' + esc(r.id) + '" aria-label="Remove worktree ' + esc(c.name) + '" title="Remove worktree (the branch is kept)">' + ic("i-trash") + '</button></li>').join("")).join("")).join("");
     if (!S.workspaces.length) tree.innerHTML = '<li class="empty">No workspaces. Click “+ Workspace”, then “+ Repo”.</li>';
   }
   async function selectRepo(id) {
@@ -286,18 +290,48 @@
     $("tbody", $("#events-table")).innerHTML = S.events.map((e) => "<tr><td>" + esc(e.ts.slice(0, 19).replace("T", " ")) + "</td><td>" + esc(e.kind) + "</td><td>" + esc(e.message) + "</td></tr>").join("") || "<tr><td colspan='3' class='muted'>No events yet.</td></tr>";
   }
 
+  // ----- worktrees ------------------------------------------------------------------------
+  async function newWorktree(mainId) {
+    const main = S.workspaces.flatMap((w) => w.repos).find((r) => r.id === mainId); if (!main) return;
+    const name = await dialog("New worktree of " + main.name, "A separate checkout in .worktrees/<name>, on a new branch with the same name, from the current HEAD. Open a terminal in it to run a second agent or task side by side.", { input: "Name (also the branch name)", ok: "Create" });
+    if (!name) return;
+    try {
+      const r = await api("POST", "/api/repos/" + mainId + "/worktrees", { name: name.trim() });
+      await loadWorkspaces(); toast("ok", "Worktree " + r.repo.name + " on branch " + (r.worktree && r.worktree.branch || name)); await selectRepo(r.repo.id);
+    } catch (e) { toast("bad", e.message, true); }
+  }
+  async function removeWorktree(mainId, name) {
+    if (!(await dialog("Remove worktree", "Remove worktree " + name + "? Its folder is deleted; the branch " + name + " is kept.", { ok: "Remove", danger: true }))) return;
+    const url = "/api/repos/" + mainId + "/worktrees/" + encodeURIComponent(name);
+    try { await api("DELETE", url); }
+    catch (e) {
+      if (e.status === 409 && /uncommitted/.test(e.message)) {
+        if (await dialog("Uncommitted changes", "The worktree " + name + " has uncommitted changes that will be lost. Remove it anyway?", { ok: "Remove anyway", danger: true })) { try { await api("DELETE", url + "?force=1"); } catch (x) { toast("bad", x.message, true); return; } } else return;
+      } else { toast("bad", e.message, true); return; }
+    }
+    const removed = S.workspaces.flatMap((w) => w.repos).find((r) => r.parent_id === mainId && r.name === name);
+    if (removed) S.terminals.forEach((t, id) => { if (t.repoId === removed.id) closeTerminal(id); });
+    if (removed && S.repoId === removed.id) S.repoId = mainId;
+    await loadWorkspaces(); toast("ok", "Removed worktree " + name); await selectRepo(S.repoId);
+  }
+
   // ----- terminals -----------------------------------------------------------------------
+  function terminalName(repoId) {
+    const all = S.workspaces.flatMap((w) => w.repos), r = all.find((x) => x.id === repoId); if (!r) return "";
+    const parent = r.parent_id && all.find((x) => x.id === r.parent_id);
+    return parent ? parent.name + " \u203a " + r.name : r.name;
+  }
   async function openTerminal() {
     if (!S.repoId) { toast("warn", "Terminals belong to a repository: select one in the sidebar, or add one to this workspace with “+ Repo”."); return; }
     let data;
     try { data = await api("POST", rp("/terminals"), { cols: 120, rows: 30 }); } catch (err) { toast("bad", "Terminal: " + err.message); return; }
     const t = data.terminal, tabs = $("#bottom-tabs");
-    const tab = document.createElement("button"); tab.className = "tab"; tab.setAttribute("role", "tab"); tab.dataset.tab = "term-" + t.id; const repoName = (S.workspaces.flatMap((w) => w.repos).find((r) => r.id === S.repoId) || { name: "" }).name;
+    const tab = document.createElement("button"); tab.className = "tab"; tab.setAttribute("role", "tab"); tab.dataset.tab = "term-" + t.id; const repoName = terminalName(S.repoId);
     tab.innerHTML = ic("i-terminal") + esc(repoName || "Terminal") + " <span class='close' aria-label='Close terminal' title='Close terminal'>×</span>"; tab.title = "Terminal in " + repoName; tabs.appendChild(tab);
     const pane = document.createElement("div"); pane.id = "pane-term-" + t.id; pane.className = "pane term-pane"; pane.setAttribute("role", "tabpanel"); pane.hidden = true; $("#terminal-panes").appendChild(pane);
     const term = new Terminal({ cursorBlink: true, fontSize: 13, theme: { background: "#000000" } }); const fit = new FitAddon.FitAddon(); term.loadAddon(fit); term.open(pane);
     const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws/terminals/" + t.id); ws.binaryType = "arraybuffer";
-    const entry = { id: t.id, term, fit, ws, tab, pane }; S.terminals.set(t.id, entry);
+    const entry = { id: t.id, term, fit, ws, tab, pane, repoId: S.repoId }; S.terminals.set(t.id, entry);
     // Auth must be the first frame: fit() can fire onResize, which would otherwise arrive before it.
     ws.onopen = () => { ws.send(JSON.stringify({ type: "auth", token: S.token, cols: term.cols, rows: term.rows })); selectTab("bottom", "term-" + t.id); fit.fit(); term.focus(); };
     ws.onmessage = (ev) => term.write(new Uint8Array(ev.data));
@@ -382,7 +416,9 @@
     $("#workspace-select").addEventListener("change", (ev) => { S.workspaceId = ev.target.value; const w = S.workspaces.find((x) => x.id === ev.target.value); const r = w && w.repos.find((x) => x.exists); if (r) selectRepo(r.id); else { S.repoId = null; S.stateSeq++; S.selection = null; renderDetail(); renderWorkspaces(); refreshAll(); } });
     $("#repo-select").addEventListener("change", (ev) => selectRepo(ev.target.value));
     $("#workspace-list").addEventListener("click", async (ev) => {
-      const del = ev.target.closest("[data-del-repo]"), delWs = ev.target.closest("[data-del-ws]"), repo = ev.target.closest("[data-repo]");
+      const del = ev.target.closest("[data-del-repo]"), delWs = ev.target.closest("[data-del-ws]"), addWt = ev.target.closest("[data-add-wt]"), delWt = ev.target.closest("[data-del-wt]"), repo = ev.target.closest("[data-repo]");
+      if (addWt) { await newWorktree(addWt.dataset.addWt); return; }
+      if (delWt) { await removeWorktree(delWt.dataset.main, delWt.dataset.delWt); return; }
       if (del) { if (await dialog("Remove repository", "Remove it from the workspace? Files on disk are not touched.", { ok: "Remove", danger: true })) { await api("DELETE", "/api/workspaces/" + del.dataset.ws + "/repos/" + del.dataset.delRepo).catch((e) => toast("bad", e.message)); await loadWorkspaces(); await refreshAll(); } return; }
       if (delWs) { if (await dialog("Remove workspace", "Remove this workspace and its repository list? Files on disk are not touched.", { ok: "Remove", danger: true })) { await api("DELETE", "/api/workspaces/" + delWs.dataset.delWs).catch((e) => toast("bad", e.message)); await loadWorkspaces(); await refreshAll(); } return; }
       if (repo && !repo.classList.contains("missing")) selectRepo(repo.dataset.repo);

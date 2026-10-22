@@ -123,6 +123,21 @@ folder inside a git repository (a git worktree is fine) and registers its
 toplevel. The `×` next to a workspace or repository removes it from the list
 only; nothing on disk is touched.
 
+### Worktrees: one checkout per task, one terminal each
+
+Hovering a repository in the sidebar shows a "+" with a folder icon: **New
+worktree**. It asks for a name and creates `<repo>/.worktrees/<name>` as a git
+worktree on a new branch of the same name, cut from the current HEAD (the
+`.worktrees/` folder is excluded through `.git/info/exclude`, so it never shows
+up as untracked). The worktree appears nested under its repository and works
+like any other repository on the page: its own branch, graph, changes,
+proposals and terminals. A terminal opened there starts in that folder and its
+tab reads `repo › worktree`, so you can keep one agent (`claude`, or whatever
+you run) per worktree and push several tasks at once without them stepping on
+each other's files. The trash icon removes the worktree; it refuses when there
+are uncommitted changes unless you confirm, and the branch is always kept.
+The same operations exist over the API (`/api/repos/{id}/worktrees`).
+
 The list lives in `~/.config/argonauta/workspaces.json` (names and paths only).
 The same list is available from the shell:
 
@@ -475,7 +490,7 @@ guess and asks for `--yes` instead of hanging.
 
 ## Tests
 
-`scripts/test.sh` runs 155 tests against real git repositories, a real server
+`scripts/test.sh` runs 159 tests against real git repositories, a real server
 thread and real pty shells, not mocks:
 
 - core: store round trips and cascade deletes, diff extraction and path
