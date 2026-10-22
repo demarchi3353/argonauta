@@ -297,3 +297,117 @@ def get_job(ctx, params, query, body):
     if job is None:
         raise ApiError(404, "job not found")
     return 200, job.to_dict()
+
+
+# ----- git actions ---------------------------------------------------------------------
+from argonauta.web.jobs import JobConflict  # noqa: E402
+
+
+def submit_job(ctx: Any, repo: Repo, kind: str, fn: Callable[[Callable[[str], None]], dict]) -> tuple[int, dict]:
+    try:
+        job = ctx.jobs.submit(kind, repo.id, fn)
+    except JobConflict as exc:
+        return 409, {"error": str(exc), "job": exc.job.to_dict()}
+    log.info("job %s %s submitted for %s", job.id, kind, repo.id)
+    return 202, {"job": job.to_dict()}
+
+
+@route("POST", rf"^/api/repos/(?P<rid>{ID})/stage$")
+def stage_paths(ctx, params, query, body):
+    repo = resolve_repo(ctx, params["rid"])
+    paths = clean_paths(repo, body.get("paths"))
+    _git(lambda: gitops.stage(repo.path, paths))
+    record_event(repo, "git.stage", f"staged {len(paths)} paths")
+    return 200, {"ok": True, "count": len(paths)}
+
+
+@route("POST", rf"^/api/repos/(?P<rid>{ID})/unstage$")
+def unstage_paths(ctx, params, query, body):
+    repo = resolve_repo(ctx, params["rid"])
+    paths = clean_paths(repo, body.get("paths"))
+    _git(lambda: gitops.unstage(repo.path, paths))
+    record_event(repo, "git.unstage", f"unstaged {len(paths)} paths")
+    return 200, {"ok": True, "count": len(paths)}
+
+
+@route("POST", rf"^/api/repos/(?P<rid>{ID})/discard$")
+def discard_paths(ctx, params, query, body):
+    repo = resolve_repo(ctx, params["rid"])
+    paths = clean_paths(repo, body.get("paths"))
+    _git(lambda: gitops.discard(repo.path, paths))
+    record_event(repo, "git.discard", f"discarded changes in {len(paths)} paths")
+    return 200, {"ok": True, "count": len(paths)}
+
+
+@route("POST", rf"^/api/repos/(?P<rid>{ID})/commit$")
+def commit_staged(ctx, params, query, body):
+    repo = resolve_repo(ctx, params["rid"])
+    message = require_str(body, "message", 5000)
+    amend = require_bool(body, "amend", False)
+    staged = [e for e in _git(lambda: gitops.status_detail(repo.path)) if e.index not in " ?" and not e.conflicted]
+    if not staged and not amend:
+        raise ApiError(409, "nothing is staged")
+    sha = _git(lambda: gitops.commit_message(repo.path, message, amend=amend))
+    record_event(repo, "git.commit", f"committed {len(staged)} files as {sha[:10]}" + (" (amend)" if amend else ""))
+    return 201, {"sha": sha}
+
+
+@route("POST", rf"^/api/repos/(?P<rid>{ID})/branches$")
+def create_branch(ctx, params, query, body):
+    repo = resolve_repo(ctx, params["rid"])
+    name = require_str(body, "name", 200)
+    start = require_str(body, "from", 200, allow_empty=True).strip() or None
+    if not gitops.valid_branch_name(repo.path, name):
+        raise ApiError(400, "name is not a valid branch name")
+    if start and not (gitops.valid_branch_name(repo.path, start) or SHA_RE.match(start)):
+        raise ApiError(400, "from must be a branch name or commit sha")
+    _git(lambda: gitops.create_branch(repo.path, name, start))
+    record_event(repo, "git.branch", f"created branch {name}")
+    return 201, {"name": name}
+
+
+@route("POST", rf"^/api/repos/(?P<rid>{ID})/checkout$")
+def checkout_branch(ctx, params, query, body):
+    repo = resolve_repo(ctx, params["rid"])
+    name = require_str(body, "name", 200)
+    if not gitops.valid_branch_name(repo.path, name):
+        raise ApiError(400, "name is not a valid branch name")
+    _git(lambda: gitops.checkout(repo.path, name))
+    record_event(repo, "git.checkout", f"checked out {name}")
+    return 200, {"branch": gitops.current_branch(repo.path)}
+
+
+@route("DELETE", rf"^/api/repos/(?P<rid>{ID})/branches/(?P<name>.+)$")
+def delete_branch(ctx, params, query, body):
+    from urllib.parse import unquote
+
+    repo = resolve_repo(ctx, params["rid"])
+    name = unquote(params["name"])
+    if not gitops.valid_branch_name(repo.path, name):
+        raise ApiError(400, "name is not a valid branch name")
+    if name == gitops.current_branch(repo.path):
+        raise ApiError(409, "cannot delete the current branch")
+    force = query.get("force", ["0"])[0] == "1"
+    _git(lambda: gitops.delete_branch(repo.path, name, force=force))
+    record_event(repo, "git.branch.delete", f"deleted branch {name}")
+    return 200, {"ok": True}
+
+
+@route("POST", rf"^/api/repos/(?P<rid>{ID})/jobs/(?P<kind>fetch|pull|push)$")
+def remote_job(ctx, params, query, body):
+    repo = resolve_repo(ctx, params["rid"])
+    kind = params["kind"]
+    set_upstream = require_bool(body, "set_upstream", False)
+
+    def run(progress):
+        progress(f"git {kind}")
+        if kind == "fetch":
+            out = gitops.fetch(repo.path)
+        elif kind == "pull":
+            out = gitops.pull(repo.path)
+        else:
+            out = gitops.push(repo.path, set_upstream=set_upstream)
+        record_event(repo, f"git.{kind}", f"{kind} completed")
+        return {"output": out[-4000:]}
+
+    return submit_job(ctx, repo, kind, run)
