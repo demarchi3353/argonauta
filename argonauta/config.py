@@ -36,9 +36,10 @@ DOTENV_ALLOWLIST = (
     "ARGONAUTA_MAX_CONTEXT_FILES",
     "ARGONAUTA_MAX_CONTEXT_BYTES",
     "ARGONAUTA_TEST_TIMEOUT",
-    "ARGONAUTA_CONFIG_DIR",  # only chooses where the workspaces JSON lives
 )
-SHELL_ONLY_VARS = ("ARGONAUTA_TEST_COMMAND", "ARGONAUTA_PROVIDER", "ARGONAUTA_SCRIPTED_DIFF")
+# ARGONAUTA_CONFIG_DIR decides which workspace registry the web UI trusts, so a
+# cloned repository must not be able to redirect it either.
+SHELL_ONLY_VARS = ("ARGONAUTA_TEST_COMMAND", "ARGONAUTA_PROVIDER", "ARGONAUTA_SCRIPTED_DIFF", "ARGONAUTA_CONFIG_DIR")
 
 
 class ConfigError(ValueError):
