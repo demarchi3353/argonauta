@@ -8,7 +8,8 @@ from typing import Annotated, Optional
 
 import typer
 
-from argonauta import __version__, gitops, ui
+from argonauta import __version__, gitops
+from argonauta import ui as console_ui
 from argonauta.config import ConfigError, Settings, load_settings
 from argonauta.db import Store, StoreError
 from argonauta.logging_setup import configure_logging, get_logger
@@ -27,6 +28,8 @@ sample_app = typer.Typer(help="Load or remove clearly labelled sample records.",
 config_app = typer.Typer(help="Show or change per-repository settings.", no_args_is_help=True)
 app.add_typer(sample_app, name="sample")
 app.add_typer(config_app, name="config")
+workspace_app = typer.Typer(help="Manage workspaces (groups of repositories) for the web UI.", no_args_is_help=True)
+app.add_typer(workspace_app, name="workspace")
 
 EXIT_OK, EXIT_FAIL, EXIT_INVALID = 0, 1, 2
 
@@ -51,7 +54,7 @@ def _root(
     plain: Annotated[bool, typer.Option("--plain", help="No colour or spinners (also honours NO_COLOR).")] = False,
     version: Annotated[bool, typer.Option("--version", "-V", callback=_version, is_eager=True, help="Print the version and exit.")] = False,
 ) -> None:
-    ui.configure(plain)
+    console_ui.configure(plain)
     state.repo_override = repo
 
 
@@ -64,11 +67,11 @@ def _settings() -> Settings:
         root = gitops.repo_toplevel(start)
         state.settings = load_settings(root)
     except gitops.GitError as exc:
-        ui.failure(str(exc))
-        ui.info("Argonauta works inside a git repository. Run `git init` first, or pass --repo.")
+        console_ui.failure(str(exc))
+        console_ui.info("Argonauta works inside a git repository. Run `git init` first, or pass --repo.")
         raise typer.Exit(EXIT_INVALID)
     except ConfigError as exc:
-        ui.failure(f"Invalid configuration: {exc}")
+        console_ui.failure(f"Invalid configuration: {exc}")
         raise typer.Exit(EXIT_INVALID)
     configure_logging(state.settings.log_path if state.settings.data_dir.is_dir() else None)
     return state.settings
@@ -78,12 +81,12 @@ def _store(settings: Settings) -> Store:
     try:
         return Store.open(settings.db_path)
     except StoreError as exc:
-        ui.failure(str(exc))
+        console_ui.failure(str(exc))
         raise typer.Exit(EXIT_INVALID)
 
 
 def _fail(exc: Exception, code: int = EXIT_FAIL) -> None:
-    ui.failure(str(exc))
+    console_ui.failure(str(exc))
     raise typer.Exit(code)
 
 
@@ -102,7 +105,7 @@ def _confirm(question: str, yes: bool) -> bool:
     if yes:
         return True
     if not sys.stdin.isatty():
-        ui.failure("This needs confirmation but stdin is not a terminal. Re-run with --yes.")
+        console_ui.failure("This needs confirmation but stdin is not a terminal. Re-run with --yes.")
         raise typer.Exit(EXIT_INVALID)
     return typer.confirm(question, default=False)
 
@@ -132,12 +135,12 @@ def init(
     store = _run(init_repo, settings, test_command)
     configure_logging(settings.log_path)
     store.close()
-    ui.success(("Store already existed at " if existed else "Store created at ") + str(settings.data_dir))
+    console_ui.success(("Store already existed at " if existed else "Store created at ") + str(settings.data_dir))
     if test_command:
-        ui.info(f"Test command saved: {test_command}")
+        console_ui.info(f"Test command saved: {test_command}")
     else:
-        ui.warning('No test command set. Add one with `argonauta config set-test-command "python -m pytest -q"`.')
-    ui.info("Next: `argonauta index`")
+        console_ui.warning('No test command set. Add one with `argonauta config set-test-command "python -m pytest -q"`.')
+    console_ui.info("Next: `argonauta index`")
 
 
 @app.command()
@@ -147,7 +150,7 @@ def index() -> None:
 
     settings = _settings()
     store = _store(settings)
-    con = ui.console()
+    con = console_ui.console()
     try:
         if con.is_terminal:
             from rich.progress import BarColumn, Progress, TextColumn
@@ -169,10 +172,10 @@ def index() -> None:
     total = store.file_count()
     store.close()
     if total == 0:
-        ui.empty_state("no indexable files", "The repository has no tracked text files. Add some files, then run `argonauta index` again.")
+        console_ui.empty_state("no indexable files", "The repository has no tracked text files. Add some files, then run `argonauta index` again.")
         return
-    ui.success(f"Index ready: {total} files ({stats.indexed} indexed, {stats.unchanged} unchanged, {stats.removed} removed, {stats.skipped} skipped)")
-    ui.info('Next: `argonauta propose "<what you want changed>"`')
+    console_ui.success(f"Index ready: {total} files ({stats.indexed} indexed, {stats.unchanged} unchanged, {stats.removed} removed, {stats.skipped} skipped)")
+    console_ui.info('Next: `argonauta propose "<what you want changed>"`')
 
 
 @app.command()
@@ -186,37 +189,37 @@ def status() -> None:
     head = gitops.head_sha(root) or "none"
     dirty = gitops.status_entries(root)
     ab = gitops.ahead_behind(root)
-    t = ui.table("Repository", ["field", "value"])
+    t = console_ui.table("Repository", ["field", "value"])
     t.add_row("path", str(root))
     t.add_row("branch", branch)
     t.add_row("HEAD", head)
     t.add_row("working tree", "clean" if not dirty else f"{len(dirty)} changed/untracked")
     if ab:
         t.add_row("upstream", f"{ab[0]} ahead, {ab[1]} behind")
-    ui.print_table(t)
+    console_ui.print_table(t)
 
     if not settings.db_path.is_file():
-        ui.empty_state("not initialised", "Run `argonauta init` to create the private store for this repository.")
+        console_ui.empty_state("not initialised", "Run `argonauta init` to create the private store for this repository.")
         return
     store = _store(settings)
     files = store.file_count()
     counts = store.count_proposals_by_status()
-    t = ui.table("Argonauta", ["field", "value"])
+    t = console_ui.table("Argonauta", ["field", "value"])
     t.add_row("data", str(settings.data_dir))
     t.add_row("index", f"{files} files, last indexed {store.last_indexed_at()}" if files else "empty (run `argonauta index`)")
     t.add_row("provider", describe_provider(settings))
     t.add_row("test command", test_command_for(settings, store) or "not set")
     t.add_row("proposals", ", ".join(f"{n} {s}" for s, n in sorted(counts.items())) or "none")
-    ui.print_table(t)
+    console_ui.print_table(t)
     if settings.effective_provider == "manual":
-        ui.warning("Degraded mode: without ANTHROPIC_API_KEY, `propose` writes a prompt bundle for you to run elsewhere and `--from-diff` ingests the reply.")
+        console_ui.warning("Degraded mode: without ANTHROPIC_API_KEY, `propose` writes a prompt bundle for you to run elsewhere and `--from-diff` ingests the reply.")
     recent = store.list_proposals(limit=3)
     store.close()
     if recent:
-        t = ui.table("Recent proposals", ["id", "status", "task"])
+        t = console_ui.table("Recent proposals", ["id", "status", "task"])
         for p in recent:
-            t.add_row(str(p.id), _status_text(p.status), ui.short(p.task, 60))
-        ui.print_table(t)
+            t.add_row(str(p.id), _status_text(p.status), console_ui.short(p.task, 60))
+        console_ui.print_table(t)
 
 
 # ----- the core loop -------------------------------------------------------------
@@ -232,52 +235,52 @@ def propose(
     settings = _settings()
     store = _store(settings)
     if from_diff is not None and not from_diff.is_file():
-        ui.failure(f"--from-diff: {from_diff} is not a file.")
+        console_ui.failure(f"--from-diff: {from_diff} is not a file.")
         raise typer.Exit(EXIT_INVALID)
     try:
         if dry_run:
             outcome = _run(do_propose, settings, store, task, dry_run=True)
         else:
-            con = ui.console()
+            con = console_ui.console()
             if con.is_terminal and from_diff is None:
                 with con.status("preparing…", spinner="dots") as st:
                     outcome = _run(do_propose, settings, store, task, from_diff=from_diff, on_progress=lambda m: st.update(f"{m}…"))
             else:
                 outcome = _run(do_propose, settings, store, task, from_diff=from_diff, on_progress=lambda m: con.print(f"… {m}"))
     except ProviderUnavailable as exc:
-        ui.warning("Degraded mode")
-        ui.panel(str(exc), "Manual provider", style="yellow")
+        console_ui.warning("Degraded mode")
+        console_ui.panel(str(exc), "Manual provider", style="yellow")
         store.close()
         raise typer.Exit(EXIT_OK)
     ctx = outcome.context
     if dry_run:
         if not ctx.files:
-            ui.empty_state("no matching files", "No indexed file matched the task words. Try different wording, or run `argonauta index` after adding files.")
+            console_ui.empty_state("no matching files", "No indexed file matched the task words. Try different wording, or run `argonauta index` after adding files.")
         else:
-            t = ui.table("Context that would be sent", ["path", "bytes"])
+            t = console_ui.table("Context that would be sent", ["path", "bytes"])
             for f in ctx.files:
                 t.add_row(f.path, str(f.size))
-            ui.print_table(t)
+            console_ui.print_table(t)
             if ctx.skipped:
-                ui.warning(f"Skipped (over the byte budget): {', '.join(ctx.skipped)}")
-        ui.info(f"Provider: {describe_provider(settings)}")
+                console_ui.warning(f"Skipped (over the byte budget): {', '.join(ctx.skipped)}")
+        console_ui.info(f"Provider: {describe_provider(settings)}")
         store.close()
         return
     p = outcome.proposal
     assert p is not None and outcome.validation is not None
     store.close()
     if p.status == "invalid":
-        ui.failure(f"Proposal {p.id} recorded as invalid: {p.notes}")
+        console_ui.failure(f"Proposal {p.id} recorded as invalid: {p.notes}")
         if p.explanation:
-            ui.panel(p.explanation, "Model explanation", style="red")
-        ui.info("Review it with `argonauta show {0}` or discard it with `argonauta reject {0}`.".format(p.id))
+            console_ui.panel(p.explanation, "Model explanation", style="red")
+        console_ui.info("Review it with `argonauta show {0}` or discard it with `argonauta reject {0}`.".format(p.id))
         raise typer.Exit(EXIT_FAIL)
     v = outcome.validation
-    ui.success(f"Proposal {p.id} ready: {len(v.files)} file(s), +{v.insertions} −{v.deletions}")
+    console_ui.success(f"Proposal {p.id} ready: {len(v.files)} file(s), +{v.insertions} −{v.deletions}")
     if p.explanation:
-        ui.panel(p.explanation, "Explanation")
-    ui.diff_view(p.diff)
-    ui.info(f"Next: `argonauta apply {p.id}` to apply, test and commit, or `argonauta reject {p.id}`.")
+        console_ui.panel(p.explanation, "Explanation")
+    console_ui.diff_view(p.diff)
+    console_ui.info(f"Next: `argonauta apply {p.id}` to apply, test and commit, or `argonauta reject {p.id}`.")
 
 
 @app.command()
@@ -293,7 +296,7 @@ def show(proposal_id: Annotated[int, typer.Argument(help="Proposal id from `argo
     change = store.change_for_proposal(p.id)
     runs = store.list_test_runs(p.id, limit=5)
     store.close()
-    t = ui.table(f"Proposal {p.id}" + (" [SAMPLE]" if p.is_sample else ""), ["field", "value"])
+    t = console_ui.table(f"Proposal {p.id}" + (" [SAMPLE]" if p.is_sample else ""), ["field", "value"])
     t.add_row("status", _status_text(p.status))
     t.add_row("created", p.created_at)
     t.add_row("task", p.task)
@@ -305,17 +308,17 @@ def show(proposal_id: Annotated[int, typer.Argument(help="Proposal id from `argo
         t.add_row("notes", p.notes)
     if change:
         t.add_row("change", f"#{change.id}: {len(change.files)} files, +{change.insertions} −{change.deletions}" + (f", commit {change.commit_sha[:10]}" if change.commit_sha else ", not committed") + (f", reverted {change.reverted_at}" if change.reverted_at else ""))
-    ui.print_table(t)
+    console_ui.print_table(t)
     if p.explanation:
-        ui.panel(p.explanation, "Explanation")
-    ui.diff_view(p.diff)
+        console_ui.panel(p.explanation, "Explanation")
+    console_ui.diff_view(p.diff)
     if runs:
-        t = ui.table("Test runs", ["id", "status", "exit", "finished", "command"])
+        t = console_ui.table("Test runs", ["id", "status", "exit", "finished", "command"])
         for r in runs:
             t.add_row(str(r.id), _status_text(r.status), str(r.exit_code), r.finished_at, r.command)
-        ui.print_table(t)
+        console_ui.print_table(t)
         if runs[0].status != "passed" and runs[0].output_tail:
-            ui.panel(runs[0].output_tail, "Last test output", style="red")
+            console_ui.panel(runs[0].output_tail, "Last test output", style="red")
 
 
 @app.command()
@@ -336,12 +339,12 @@ def apply(
         store.close()
         _fail(exc, EXIT_INVALID)
     if not yes:
-        ui.diff_view(p.diff)
-    if not _confirm(f"Apply proposal {p.id} ({ui.short(p.task, 50)})?", yes):
-        ui.info("Nothing changed.")
+        console_ui.diff_view(p.diff)
+    if not _confirm(f"Apply proposal {p.id} ({console_ui.short(p.task, 50)})?", yes):
+        console_ui.info("Nothing changed.")
         store.close()
         raise typer.Exit(EXIT_OK)
-    con = ui.console()
+    con = console_ui.console()
     if con.is_terminal:
         with con.status("applying…", spinner="dots") as st:
             outcome = _run(apply_proposal, settings, store, p.id, run_tests_after=run_tests, commit_after=commit, on_progress=lambda m: st.update(f"{m}…"))
@@ -349,23 +352,23 @@ def apply(
         outcome = _run(apply_proposal, settings, store, p.id, run_tests_after=run_tests, commit_after=commit, on_progress=lambda m: con.print(f"… {m}"))
     store.close()
     ch = outcome.change
-    ui.success(f"Applied proposal {p.id}: {len(ch.files)} file(s), +{ch.insertions} −{ch.deletions}")
+    console_ui.success(f"Applied proposal {p.id}: {len(ch.files)} file(s), +{ch.insertions} −{ch.deletions}")
     if run_tests and outcome.test_run is None:
-        ui.warning("No test command configured, so no tests ran. Set one with `argonauta config set-test-command`.")
+        console_ui.warning("No test command configured, so no tests ran. Set one with `argonauta config set-test-command`.")
     if outcome.test_run is not None:
         r = outcome.test_run
         if r.status == "passed":
-            ui.success(f"Tests passed (exit {r.exit_code})")
+            console_ui.success(f"Tests passed (exit {r.exit_code})")
         else:
-            ui.failure(f"Tests {r.status} (exit {r.exit_code})")
-            ui.panel(r.output_tail or "(no output)", "Test output", style="red")
+            console_ui.failure(f"Tests {r.status} (exit {r.exit_code})")
+            console_ui.panel(r.output_tail or "(no output)", "Test output", style="red")
     if outcome.commit_sha:
-        ui.success(f"Committed as {outcome.commit_sha[:10]}")
+        console_ui.success(f"Committed as {outcome.commit_sha[:10]}")
     elif outcome.skipped_commit_reason:
-        ui.warning(f"Commit skipped: {outcome.skipped_commit_reason}.")
-        ui.info(f"Fix and `argonauta commit {p.id}`, or undo with `argonauta revert {p.id}`.")
+        console_ui.warning(f"Commit skipped: {outcome.skipped_commit_reason}.")
+        console_ui.info(f"Fix and `argonauta commit {p.id}`, or undo with `argonauta revert {p.id}`.")
     elif not commit:
-        ui.info(f"Not committed (--no-commit). Later: `argonauta commit {p.id}` or `argonauta revert {p.id}`.")
+        console_ui.info(f"Not committed (--no-commit). Later: `argonauta commit {p.id}` or `argonauta revert {p.id}`.")
     if outcome.test_run is not None and outcome.test_run.status != "passed":
         raise typer.Exit(EXIT_FAIL)
 
@@ -377,7 +380,7 @@ def test(proposal_id: Annotated[Optional[int], typer.Argument(help="Attach the r
 
     settings = _settings()
     store = _store(settings)
-    con = ui.console()
+    con = console_ui.console()
     if con.is_terminal:
         with con.status("running tests…", spinner="dots"):
             run = _run(run_tests_now, settings, store, proposal_id)
@@ -385,10 +388,10 @@ def test(proposal_id: Annotated[Optional[int], typer.Argument(help="Attach the r
         run = _run(run_tests_now, settings, store, proposal_id)
     store.close()
     if run.status == "passed":
-        ui.success(f"Tests passed (exit {run.exit_code}), recorded as run {run.id}")
+        console_ui.success(f"Tests passed (exit {run.exit_code}), recorded as run {run.id}")
     else:
-        ui.failure(f"Tests {run.status} (exit {run.exit_code}), recorded as run {run.id}")
-        ui.panel(run.output_tail or "(no output)", "Test output", style="red")
+        console_ui.failure(f"Tests {run.status} (exit {run.exit_code}), recorded as run {run.id}")
+        console_ui.panel(run.output_tail or "(no output)", "Test output", style="red")
         raise typer.Exit(EXIT_FAIL)
 
 
@@ -401,7 +404,7 @@ def commit(proposal_id: Annotated[int, typer.Argument(help="Applied proposal to 
     store = _store(settings)
     sha = _run(commit_change, settings, store, proposal_id)
     store.close()
-    ui.success(f"Committed proposal {proposal_id} as {sha[:10]}")
+    console_ui.success(f"Committed proposal {proposal_id} as {sha[:10]}")
 
 
 @app.command()
@@ -416,11 +419,11 @@ def reject(
     store = _store(settings)
     if len(reason) > 500:
         store.close()
-        ui.failure("--reason must be 500 characters or fewer.")
+        console_ui.failure("--reason must be 500 characters or fewer.")
         raise typer.Exit(EXIT_INVALID)
     p = _run(reject_proposal, store, proposal_id, reason)
     store.close()
-    ui.success(f"Rejected proposal {p.id}")
+    console_ui.success(f"Rejected proposal {p.id}")
 
 
 @app.command()
@@ -434,12 +437,12 @@ def revert(
     settings = _settings()
     store = _store(settings)
     if not _confirm(f"Revert proposal {proposal_id}?", yes):
-        ui.info("Nothing changed.")
+        console_ui.info("Nothing changed.")
         store.close()
         raise typer.Exit(EXIT_OK)
     change, sha = _run(revert_proposal, settings, store, proposal_id)
     store.close()
-    ui.success(f"Reverted change {change.id}" + (f" with commit {sha[:10]}" if sha else " (working tree restored)"))
+    console_ui.success(f"Reverted change {change.id}" + (f" with commit {sha[:10]}" if sha else " (working tree restored)"))
 
 
 # ----- history / export / import ------------------------------------------------
@@ -453,9 +456,9 @@ def history(
     store = _store(settings)
     proposals = store.list_proposals(limit=limit)
     if not proposals:
-        ui.empty_state("no proposals", 'Run `argonauta propose "<task>"` to create the first one, or `argonauta sample load` to see what history looks like.')
+        console_ui.empty_state("no proposals", 'Run `argonauta propose "<task>"` to create the first one, or `argonauta sample load` to see what history looks like.')
     else:
-        t = ui.table("Proposals", ["id", "created", "status", "tests", "commit", "task"])
+        t = console_ui.table("Proposals", ["id", "created", "status", "tests", "commit", "task"])
         for p in proposals:
             change = store.change_for_proposal(p.id)
             run = store.latest_test_run_for_proposal(p.id)
@@ -465,22 +468,22 @@ def history(
                 _status_text(p.status),
                 _status_text(run.status) if run else "–",
                 (change.commit_sha[:8] if change and change.commit_sha else "–") + (" ↩" if change and change.reverted_at else ""),
-                ui.short(p.task, 50),
+                console_ui.short(p.task, 50),
             )
-        ui.print_table(t)
+        console_ui.print_table(t)
     if events:
         evs = store.list_events(limit=limit * 3)
-        t = ui.table("Events", ["ts", "kind", "ref", "message"])
+        t = console_ui.table("Events", ["ts", "kind", "ref", "message"])
         for e in evs:
-            t.add_row(e.ts[:19].replace("T", " "), e.kind, f"{e.ref_table}#{e.ref_id}" if e.ref_table else "", ui.short(e.message, 70))
-        ui.print_table(t)
+            t.add_row(e.ts[:19].replace("T", " "), e.kind, f"{e.ref_table}#{e.ref_id}" if e.ref_table else "", console_ui.short(e.message, 70))
+        console_ui.print_table(t)
     store.close()
     log = gitops.recent_log(settings.repo_root, limit=5)
     if log:
-        t = ui.table("Recent commits", ["sha", "when", "subject"])
+        t = console_ui.table("Recent commits", ["sha", "when", "subject"])
         for e in log:
-            t.add_row(e.short, e.when[:16], ui.short(e.subject, 60))
-        ui.print_table(t)
+            t.add_row(e.short, e.when[:16], console_ui.short(e.subject, 60))
+        console_ui.print_table(t)
 
 
 @app.command("export")
@@ -492,7 +495,7 @@ def export_cmd(path: Annotated[Path, typer.Argument(help="Where to write the JSO
     store = _store(settings)
     if path.is_dir():
         store.close()
-        ui.failure(f"{path} is a directory; give a file path.")
+        console_ui.failure(f"{path} is a directory; give a file path.")
         raise typer.Exit(EXIT_INVALID)
     try:
         counts = export_to_file(store, path)
@@ -501,7 +504,7 @@ def export_cmd(path: Annotated[Path, typer.Argument(help="Where to write the JSO
         _fail(RuntimeError(f"Could not write {path}: {exc.strerror}"))
     store.record_event("export", f"exported to {path.name}")
     store.close()
-    ui.success(f"Exported to {path}: " + ", ".join(f"{n} {k}" for k, n in counts.items()))
+    console_ui.success(f"Exported to {path}: " + ", ".join(f"{n} {k}" for k, n in counts.items()))
 
 
 @app.command("import")
@@ -515,16 +518,16 @@ def import_cmd(
 
     settings = _settings()
     if not path.is_file():
-        ui.failure(f"{path} is not a file.")
+        console_ui.failure(f"{path} is not a file.")
         raise typer.Exit(EXIT_INVALID)
     try:
         data = load_export(path)
     except ExchangeError as exc:
-        ui.failure(f"Invalid export: {exc}")
+        console_ui.failure(f"Invalid export: {exc}")
         raise typer.Exit(EXIT_INVALID)
     store = _store(settings)
     if replace and not _confirm("Replace ALL existing proposals, changes, test runs and events?", yes):
-        ui.info("Nothing changed.")
+        console_ui.info("Nothing changed.")
         store.close()
         raise typer.Exit(EXIT_OK)
     try:
@@ -532,15 +535,15 @@ def import_cmd(
             report = import_data(store, data, replace=replace)
     except ExchangeError as exc:
         store.close()
-        ui.failure(f"Import aborted, nothing changed: {exc}")
+        console_ui.failure(f"Import aborted, nothing changed: {exc}")
         raise typer.Exit(EXIT_INVALID)
     store.close()
-    ui.success(f"Imported {report.proposals} proposals, {report.changes} changes, {report.test_runs} test runs, {report.events} events")
+    console_ui.success(f"Imported {report.proposals} proposals, {report.changes} changes, {report.test_runs} test runs, {report.events} events")
     if report.skipped_settings:
-        ui.warning("Settings are never imported because the test command is executed. The file contained:")
+        console_ui.warning("Settings are never imported because the test command is executed. The file contained:")
         for key, value in report.skipped_settings.items():
-            ui.info(f"  {key} = {ui.short(value, 100)}")
-        ui.info('Set it deliberately with `argonauta config set-test-command "<command>"` if you trust it.')
+            console_ui.info(f"  {key} = {console_ui.short(value, 100)}")
+        console_ui.info('Set it deliberately with `argonauta config set-test-command "<command>"` if you trust it.')
 
 
 # ----- sample / config ------------------------------------------------------------
@@ -553,8 +556,8 @@ def sample_load() -> None:
     store = _store(settings)
     created = load_samples(store)
     store.close()
-    ui.success("Loaded sample data: " + ", ".join(f"{n} {k}" for k, n in created.items()))
-    ui.info("Every sample row is marked [SAMPLE]; remove them with `argonauta sample clear`.")
+    console_ui.success("Loaded sample data: " + ", ".join(f"{n} {k}" for k, n in created.items()))
+    console_ui.info("Every sample row is marked [SAMPLE]; remove them with `argonauta sample clear`.")
 
 
 @sample_app.command("clear")
@@ -566,7 +569,7 @@ def sample_clear() -> None:
     store = _store(settings)
     counts = clear_samples(store)
     store.close()
-    ui.success("Removed sample data: " + ", ".join(f"{n} {k}" for k, n in counts.items()))
+    console_ui.success("Removed sample data: " + ", ".join(f"{n} {k}" for k, n in counts.items()))
 
 
 @config_app.command("show")
@@ -575,7 +578,7 @@ def config_show() -> None:
     from argonauta.workflow import test_command_for
 
     settings = _settings()
-    t = ui.table("Settings", ["key", "value", "source"])
+    t = console_ui.table("Settings", ["key", "value", "source"])
     t.add_row("provider", describe_provider(settings), "env ARGONAUTA_PROVIDER" if settings.provider != "auto" else "auto")
     t.add_row("api key", "present" if settings.has_api_key else "absent", ".env / environment")
     t.add_row("model", settings.model, "ARGONAUTA_MODEL")
@@ -588,7 +591,7 @@ def config_show() -> None:
         t.add_row("test command", test_command_for(settings, store) or "not set", "ARGONAUTA_TEST_COMMAND or store")
         store.close()
     t.add_row("data dir", str(settings.data_dir), "fixed")
-    ui.print_table(t)
+    console_ui.print_table(t)
 
 
 @config_app.command("set-test-command")
@@ -601,20 +604,104 @@ def config_set_test_command(command: Annotated[str, typer.Argument(help='e.g. "p
     try:
         parse_command(command)
     except RunnerError as exc:
-        ui.failure(str(exc))
+        console_ui.failure(str(exc))
         raise typer.Exit(EXIT_INVALID)
     store = _store(settings)
     store.set_setting(TEST_COMMAND_KEY, command)
     store.record_event("config", "test command updated")
     store.close()
-    ui.success(f"Test command saved: {command}")
+    console_ui.success(f"Test command saved: {command}")
+
+
+@workspace_app.command("list")
+def workspace_list() -> None:
+    """List workspaces and their repositories."""
+    from argonauta.workspaces import RegistryError, open_registry
+
+    try:
+        registry = open_registry()
+    except RegistryError as exc:
+        _fail(exc, EXIT_INVALID)
+    if not registry.workspaces:
+        console_ui.empty_state("no workspaces", "Add one with `argonauta workspace add PATH` or from the web UI (`argonauta ui`).")
+        return
+    t = console_ui.table("Workspaces", ["workspace", "repository", "path", "store"])
+    for ws in registry.workspaces:
+        if not ws.repos:
+            t.add_row(ws.name, "(empty)", "", "")
+        for r in ws.repos:
+            t.add_row(ws.name, r.name, str(r.path), ("initialised" if r.initialized else "not initialised") if r.exists else "missing")
+    console_ui.print_table(t)
+    console_ui.info(f"Registry: {registry.path}")
+
+
+@workspace_app.command("add")
+def workspace_add(
+    path: Annotated[Path, typer.Argument(help="Path inside a git repository.")],
+    workspace: Annotated[str, typer.Option("--workspace", "-w", help="Workspace name (created if missing).")] = "Default",
+) -> None:
+    """Register a repository in a workspace."""
+    from argonauta.workspaces import RegistryError, open_registry
+
+    try:
+        registry = open_registry()
+        ws = next((w for w in registry.workspaces if w.name == workspace), None) or registry.add_workspace(workspace)
+        repo = registry.add_repo(ws.id, path)
+    except RegistryError as exc:
+        _fail(exc, EXIT_INVALID)
+    console_ui.success(f"Added {repo.path} to workspace {ws.name!r} as {repo.id}")
+
+
+@workspace_app.command("remove")
+def workspace_remove(path: Annotated[Path, typer.Argument(help="Path of a registered repository.")]) -> None:
+    """Remove a repository from every workspace."""
+    from argonauta.workspaces import RegistryError, open_registry
+
+    try:
+        registry = open_registry()
+        repo = registry.find_repo_by_path(path)
+        if repo is None:
+            raise RegistryError(f"{path} is not registered")
+        registry.remove_repo(repo.id)
+    except RegistryError as exc:
+        _fail(exc, EXIT_INVALID)
+    console_ui.success(f"Removed {repo.path}")
+
+
+@app.command()
+def ui(
+    port: Annotated[int, typer.Option("--port", "-p", min=0, max=65535, help="Port to listen on (0 = pick a free port).")] = 0,
+    host: Annotated[str, typer.Option("--host", help="127.0.0.1 or localhost only.")] = "127.0.0.1",
+    open_browser: Annotated[bool, typer.Option("--open/--no-open", help="Open the page in your browser.")] = True,
+) -> None:
+    """Start the local web UI (commit graph, staging, branches, terminal, assistant)."""
+    from argonauta.web.app import run_ui
+
+    if host not in ("127.0.0.1", "localhost"):
+        console_ui.failure("The UI only listens on 127.0.0.1 or localhost; it is a single-user tool.")
+        raise typer.Exit(EXIT_INVALID)
+    start_repo: Path | None = None
+    try:
+        start_repo = gitops.repo_toplevel((state.repo_override or Path.cwd()).resolve())
+    except gitops.GitError:
+        start_repo = None  # the page lets you add repositories
+    console_ui.info("Press Ctrl+C to stop. Everything stays on this machine.")
+    try:
+        code = run_ui(host=host, port=port, open_browser=open_browser, start_repo=start_repo, announce=lambda line: (typer.echo(line), sys.stdout.flush()))
+    except ValueError as exc:
+        console_ui.failure(str(exc))
+        raise typer.Exit(EXIT_INVALID)
+    except OSError as exc:
+        console_ui.failure(f"Could not start the server: {exc.strerror or exc}")
+        raise typer.Exit(EXIT_FAIL)
+    raise typer.Exit(code)
 
 
 def main() -> None:
     try:
         app()
     except KeyboardInterrupt:
-        ui.failure("Interrupted.")
+        console_ui.failure("Interrupted.")
         sys.exit(130)
 
 

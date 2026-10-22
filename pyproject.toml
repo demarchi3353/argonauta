@@ -28,3 +28,6 @@ include = ["argonauta*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.setuptools.package-data]
+argonauta = ["web/static/*.html", "web/static/*.js", "web/static/*.css", "web/static/vendor/*"]
