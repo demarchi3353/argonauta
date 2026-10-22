@@ -12,6 +12,10 @@ def get_provider(settings: Settings) -> Provider:
         from argonauta.providers.anthropic_provider import AnthropicProvider
 
         return AnthropicProvider(settings)
+    if name == "local":
+        from argonauta.providers.local import LocalProvider
+
+        return LocalProvider(settings)
     if name == "scripted":
         from argonauta.providers.scripted import ScriptedProvider
 
@@ -25,6 +29,8 @@ def describe_provider(settings: Settings) -> str:
     name = settings.effective_provider
     if name == "anthropic":
         return f"anthropic ({settings.model}, effort {settings.effort})"
+    if name == "local":
+        return f"local ({settings.local_model} at {settings.local_url}, OpenAI-compatible API)"
     if name == "scripted":
         return "scripted (TEST ONLY: replays a diff from a file, not a real model)"
     return "manual (degraded: no API key, you paste the diff yourself)"

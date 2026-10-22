@@ -22,7 +22,9 @@ LOGGER_NAME = "argonauta"
 class RedactingFilter(logging.Filter):
     def __init__(self) -> None:
         super().__init__()
-        self._secrets = [v for name in SECRET_ENV_VARS if (v := os.environ.get(name, "").strip())]
+        # Values shorter than 8 chars are not treated as secrets: redacting a
+        # one-letter "key" would mangle every log line.
+        self._secrets = [v for name in SECRET_ENV_VARS if len(v := os.environ.get(name, "").strip()) >= 8]
 
     def _scrub(self, text: str) -> str:
         text = _KEY_PATTERN.sub("[redacted]", text)

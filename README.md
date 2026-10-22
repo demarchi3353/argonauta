@@ -37,9 +37,14 @@ scripts/dev.sh --help      # run the CLI from source
 scripts/dev.sh ui          # run the web UI from source
 ```
 
-Optional: put an Anthropic API key in `.env` to let the assistant call a model.
-Without one, Argonauta runs in **manual mode** (see "Degraded mode" below) and
-never opens a network connection.
+The assistant needs a model. Three ways, in the order `auto` tries them:
+
+1. an Anthropic API key in `.env` (the `anthropic` provider);
+2. a model running on your machine behind an OpenAI-compatible API, such as
+   Ollama, LM Studio, llama.cpp server or vLLM (the `local` provider; see
+   "Local models" below);
+3. neither: **manual mode** (see "Degraded mode" below), which never opens a
+   network connection.
 
 `.env.example` documents every variable. "Shell only" means the variable is
 ignored when it appears in a repository's `.env` and must come from your shell,
@@ -55,7 +60,11 @@ settings live.
 | `ARGONAUTA_MAX_CONTEXT_FILES` | `8` | Cap on files sent with a task. |
 | `ARGONAUTA_MAX_CONTEXT_BYTES` | `60000` | Cap on total bytes sent with a task. |
 | `ARGONAUTA_TEST_TIMEOUT` | `600` | Seconds before a test run is killed. |
-| `ARGONAUTA_PROVIDER` | `auto` | `auto`, `anthropic`, `manual`, or `scripted` (test only). Shell only. |
+| `ARGONAUTA_LOCAL_MODEL` | unset | Model name for the local provider, e.g. `qwen2.5-coder:7b`. |
+| `ARGONAUTA_LOCAL_API_KEY` | unset | Bearer token for local servers that require one. |
+| `ARGONAUTA_PROVIDER` | `auto` | `auto`, `anthropic`, `local`, `manual`, or `scripted` (test only). Shell only. |
+| `ARGONAUTA_LOCAL_URL` | `http://127.0.0.1:11434/v1` | Base URL of the OpenAI-compatible API. Loopback only unless allowed. Shell only. |
+| `ARGONAUTA_LOCAL_ALLOW_REMOTE` | unset | Set to `1` to allow a non-loopback `ARGONAUTA_LOCAL_URL`. Shell only. |
 | `ARGONAUTA_TEST_COMMAND` | unset | Overrides the test command saved by `init`. Shell only. |
 | `ARGONAUTA_CONFIG_DIR` | `~/.config/argonauta` | Where the workspace registry lives. Shell only. |
 
@@ -230,6 +239,30 @@ Every command has a clear state: an empty state that names the next command,
 a loading spinner or progress bar on a terminal, validation errors (exit code 2),
 success lines prefixed with `✓` (exit 0) and failures prefixed with `✗` (exit 1).
 
+## Local models
+
+Any server that speaks the OpenAI chat-completions API works, with no extra
+dependency. With Ollama, for example:
+
+```
+ollama pull qwen2.5-coder:7b
+export ARGONAUTA_LOCAL_MODEL=qwen2.5-coder:7b      # or put it in .env
+argonauta status                                   # provider: local (qwen2.5-coder:7b at http://127.0.0.1:11434/v1 ...)
+argonauta propose "Make power() handle negative exponents"
+```
+
+LM Studio listens on `http://127.0.0.1:1234/v1`, llama.cpp server and vLLM on
+`http://127.0.0.1:8080/v1` and `http://127.0.0.1:8000/v1` by default; set
+`ARGONAUTA_LOCAL_URL` in your shell accordingly. The request carries the same
+content as for the Anthropic provider (system prompt, task, repository summary,
+selected files) and is sent only to that URL, which must be a loopback address
+unless you set `ARGONAUTA_LOCAL_ALLOW_REMOTE=1` in your shell on purpose. The
+reply goes through the same diff extraction and validation as any other.
+
+Small local models produce more invalid diffs than large hosted ones; those
+are stored as `invalid` with the model's explanation, and the context caps keep
+prompts within what a 7B model handles well.
+
 ## Degraded mode (no API key)
 
 With no key, a proposal writes a prompt bundle to `.argonauta/prompts/`
@@ -270,17 +303,17 @@ and points at `pip install 'argonauta[anthropic]'`.
 - **Network**: the page talks only to the loopback server that `argonauta ui`
   started, authenticated with a per-run token, and loads no external script,
   font or image. Fetch, pull and push talk to your remotes with your own
-  credentials. The model request goes to the Anthropic API, and only when a
-  key is present and you propose without "Dry run" or `--from-diff`; it
-  contains the system prompt, your task text, a short repository summary (name,
-  branch, file count, languages) and the contents of the selected context
-  files. Nothing else is ever sent anywhere.
+  credentials. The model request goes to the Anthropic API or to the local
+  model URL, and only when a provider is configured and you propose without
+  "Dry run" or `--from-diff`; it contains the system prompt, your task text, a
+  short repository summary (name, branch, file count, languages) and the
+  contents of the selected context files. Nothing else is ever sent anywhere.
 - **`.env` is read with an allowlist.** Only `ANTHROPIC_API_KEY` and the
   non-executable `ARGONAUTA_*` tuning keys are loaded from the file; your shell
   always wins over it, and the API endpoint is pinned in code. The test
-  command, provider choice, scripted-diff path and registry location are
-  shell-only, so a cloned repository cannot redirect requests, inject settings,
-  or choose what runs through its `.env`.
+  command, provider choice, scripted-diff path, local model URL and registry
+  location are shell-only, so a cloned repository cannot redirect requests,
+  inject settings, or choose what runs through its `.env`.
 - **Logs** (`.argonauta/argonauta.log`) contain ids, counts, paths and status
   words. They never contain diffs, file contents, terminal traffic, tokens or
   secrets; a redacting filter scrubs key-shaped strings as a last resort. The
@@ -300,7 +333,8 @@ argonauta/
   diffs.py               extract / parse / validate unified diffs from untrusted text
   prompts.py             system prompt, context packing, reply parsing, manual bundle
   providers/             anthropic (SDK, streaming, adaptive thinking, refusal fallbacks),
-                         manual (degraded), scripted (test only)
+                         local (OpenAI-compatible API over urllib), manual (degraded),
+                         scripted (test only)
   runner.py              test command execution without a shell
   workflow.py            propose -> apply -> test -> commit / revert, with audit events
   exchange.py            JSON export and validated import (merge or replace)
@@ -399,7 +433,7 @@ guess and asks for `--yes` instead of hanging.
 
 ## Tests
 
-`scripts/test.sh` runs 127 tests against real git repositories, a real server
+`scripts/test.sh` runs 134 tests against real git repositories, a real server
 thread and real pty shells, not mocks:
 
 - core: store round trips and cascade deletes, diff extraction and path
@@ -408,7 +442,9 @@ thread and real pty shells, not mocks:
   round trips with rejection of malformed payloads and atomicity, the workflow
   against a temporary repository (propose, apply, test, commit, revert, failed
   tests blocking commits, dirty-tree refusal, invalid diffs), log redaction,
-  `.env` allowlisting, and an end-to-end CLI smoke test run as a subprocess;
+  `.env` allowlisting, the local provider against a fake OpenAI-compatible
+  server (request shape, auth header, error mapping, loopback rule), and an
+  end-to-end CLI smoke test run as a subprocess;
 - git operations: branches, graph, status areas, staging, discard, commit,
   branch lifecycle, fetch/pull/push against a bare remote, a remote that needs
   credentials failing fast, refs that look like flags being rejected;

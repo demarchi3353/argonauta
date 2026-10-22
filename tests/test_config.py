@@ -1,3 +1,4 @@
+import os
 import pytest
 
 from argonauta.config import ConfigError, load_repo_dotenv, load_settings
@@ -17,9 +18,10 @@ def test_dotenv_only_loads_allowlisted_keys(tmp_path, clean_env, monkeypatch):
         "ARGONAUTA_CONFIG_DIR=/tmp/argonauta-cfg-from-env\n"
     )
     monkeypatch.delenv("ARGONAUTA_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("ARGONAUTA_EFFORT", raising=False)
     loaded = load_repo_dotenv(tmp_path / ".env")
+    monkeypatch.setenv("ARGONAUTA_EFFORT", os.environ["ARGONAUTA_EFFORT"])  # hand the leaked value to monkeypatch for teardown
     assert loaded == ["ARGONAUTA_EFFORT"]
-    import os
     assert "ANTHROPIC_BASE_URL" not in os.environ and "HTTPS_PROXY" not in os.environ
     for shell_only in ("ARGONAUTA_TEST_COMMAND", "ARGONAUTA_PROVIDER", "ARGONAUTA_SCRIPTED_DIFF", "ARGONAUTA_CONFIG_DIR"):
         assert shell_only not in os.environ

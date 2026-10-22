@@ -19,8 +19,10 @@ PROMPTS_DIR_NAME = "prompts"
 DEFAULT_MODEL = "claude-opus-5-5"
 DEFAULT_EFFORT = "medium"
 VALID_EFFORTS = ("low", "medium", "high", "xhigh", "max")
-VALID_PROVIDERS = ("auto", "anthropic", "manual", "scripted")
-SECRET_ENV_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+VALID_PROVIDERS = ("auto", "anthropic", "local", "manual", "scripted")
+SECRET_ENV_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ARGONAUTA_LOCAL_API_KEY")
+DEFAULT_LOCAL_URL = "http://127.0.0.1:11434/v1"  # Ollama's OpenAI-compatible endpoint
+LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1", "[::1]")
 
 # Only these keys are read from a repository's .env. A cloned repository must
 # not be able to point the SDK at another endpoint (ANTHROPIC_BASE_URL, proxy
@@ -36,10 +38,14 @@ DOTENV_ALLOWLIST = (
     "ARGONAUTA_MAX_CONTEXT_FILES",
     "ARGONAUTA_MAX_CONTEXT_BYTES",
     "ARGONAUTA_TEST_TIMEOUT",
+    "ARGONAUTA_LOCAL_MODEL",
+    "ARGONAUTA_LOCAL_API_KEY",
 )
+# ARGONAUTA_LOCAL_URL / ARGONAUTA_LOCAL_ALLOW_REMOTE decide where your code is
+# sent when the local provider is active, so they are shell-only as well.
 # ARGONAUTA_CONFIG_DIR decides which workspace registry the web UI trusts, so a
 # cloned repository must not be able to redirect it either.
-SHELL_ONLY_VARS = ("ARGONAUTA_TEST_COMMAND", "ARGONAUTA_PROVIDER", "ARGONAUTA_SCRIPTED_DIFF", "ARGONAUTA_CONFIG_DIR")
+SHELL_ONLY_VARS = ("ARGONAUTA_TEST_COMMAND", "ARGONAUTA_PROVIDER", "ARGONAUTA_SCRIPTED_DIFF", "ARGONAUTA_CONFIG_DIR", "ARGONAUTA_LOCAL_URL", "ARGONAUTA_LOCAL_ALLOW_REMOTE")
 
 
 class ConfigError(ValueError):
@@ -59,6 +65,9 @@ class Settings:
     max_context_bytes: int
     test_command_override: str | None
     test_timeout: int
+    local_url: str = DEFAULT_LOCAL_URL
+    local_model: str | None = None
+    local_allow_remote: bool = False
 
     @property
     def data_dir(self) -> Path:
@@ -80,7 +89,11 @@ class Settings:
     def effective_provider(self) -> str:
         if self.provider != "auto":
             return self.provider
-        return "anthropic" if self.has_api_key else "manual"
+        if self.has_api_key:
+            return "anthropic"
+        if self.local_model:
+            return "local"
+        return "manual"
 
 
 def _int_env(name: str, default: int, minimum: int, maximum: int) -> int:
@@ -140,8 +153,16 @@ def load_settings(repo_root: Path) -> Settings:
     scripted_raw = os.environ.get("ARGONAUTA_SCRIPTED_DIFF", "").strip()
     scripted_diff = Path(scripted_raw).expanduser() if scripted_raw else None
 
-    has_api_key = any(os.environ.get(name, "").strip() for name in SECRET_ENV_VARS)
+    has_api_key = any(os.environ.get(name, "").strip() for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"))
     override = os.environ.get("ARGONAUTA_TEST_COMMAND", "").strip() or None
+
+    local_model = os.environ.get("ARGONAUTA_LOCAL_MODEL", "").strip() or None
+    if local_model and (len(local_model) > 200 or any(ch.isspace() for ch in local_model)):
+        raise ConfigError("ARGONAUTA_LOCAL_MODEL must be a single model name without whitespace")
+    local_allow_remote = os.environ.get("ARGONAUTA_LOCAL_ALLOW_REMOTE", "").strip().lower() in ("1", "true", "yes", "on")
+    local_url = _local_url(os.environ.get("ARGONAUTA_LOCAL_URL", "").strip() or DEFAULT_LOCAL_URL, local_allow_remote)
+    if provider == "local" and not local_model:
+        raise ConfigError("ARGONAUTA_LOCAL_MODEL must name the model to use with the local provider (e.g. qwen2.5-coder:7b)")
 
     return Settings(
         repo_root=repo_root,
@@ -155,4 +176,21 @@ def load_settings(repo_root: Path) -> Settings:
         max_context_bytes=_int_env("ARGONAUTA_MAX_CONTEXT_BYTES", 60_000, 1_000, 2_000_000),
         test_command_override=override,
         test_timeout=_int_env("ARGONAUTA_TEST_TIMEOUT", 600, 5, 7200),
+        local_url=local_url,
+        local_model=local_model,
+        local_allow_remote=local_allow_remote,
     )
+
+
+def _local_url(raw: str, allow_remote: bool) -> str:
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(raw)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ConfigError("ARGONAUTA_LOCAL_URL must be an http(s) URL such as http://127.0.0.1:11434/v1")
+    if not allow_remote and parts.hostname not in LOOPBACK_HOSTS:
+        raise ConfigError(
+            f"ARGONAUTA_LOCAL_URL points at {parts.hostname!r}, which is not a loopback address. "
+            "Your code is sent to that server; set ARGONAUTA_LOCAL_ALLOW_REMOTE=1 in your shell if that is intended."
+        )
+    return raw.rstrip("/")
