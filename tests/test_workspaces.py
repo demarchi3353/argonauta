@@ -83,3 +83,26 @@ def test_corrupt_file_is_an_error(tmp_path, monkeypatch):
     (tmp_path / "workspaces.json").write_text("{not json")
     with pytest.raises(RegistryError, match="not valid"):
         open_registry()
+
+
+def test_add_repo_with_a_file_path_is_a_registry_error(registry, sample_repo):
+    ws = registry.add_workspace("W")
+    with pytest.raises(RegistryError, match="git repository"):
+        registry.add_repo(ws.id, sample_repo / "README.md")
+
+
+def test_concurrent_mutations_are_serialised(registry):
+    import threading
+
+    def add(i):
+        registry.add_workspace(f"ws-{i}")
+
+    threads = [threading.Thread(target=add, args=(i,)) for i in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(registry.workspaces) == 20
+    reloaded = Registry(registry.path)
+    reloaded.load()
+    assert len(reloaded.workspaces) == 20

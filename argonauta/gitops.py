@@ -25,6 +25,8 @@ def run_git(
     merged_env = None
     if env:
         merged_env = {**os.environ, **env}
+    if not Path(repo_root).is_dir():
+        raise GitError(f"cannot run git in {repo_root}: not a directory")
     try:
         proc = subprocess.run(
             ["git", *args],
@@ -38,6 +40,8 @@ def run_git(
         )
     except FileNotFoundError as exc:
         raise GitError("git is not installed or not on PATH.") from exc
+    except OSError as exc:
+        raise GitError(f"cannot run git in {repo_root}: {exc.strerror or exc}") from exc
     except subprocess.TimeoutExpired as exc:
         raise GitError(f"git {' '.join(args[:2])} timed out after {timeout or GIT_TIMEOUT}s.") from exc
     if check and proc.returncode != 0:
@@ -422,8 +426,17 @@ def discard(repo_root: Path, paths: list[str]) -> None:
     status = {e.path: e for e in status_detail(repo_root)}
     untracked = [p for p in paths if p in status and status[p].untracked]
     tracked = [p for p in paths if p not in untracked]
-    if tracked:
-        run_git(repo_root, "checkout", "--", *tracked)
+    in_head: list[str] = []
+    added_only: list[str] = []
+    for p in tracked:
+        if has_commits(repo_root) and run_git(repo_root, "cat-file", "-e", f"HEAD:{p}", check=False).returncode == 0:
+            in_head.append(p)
+        else:
+            added_only.append(p)
+    if in_head:  # drop both the staged and the working-tree change
+        run_git(repo_root, "restore", "--staged", "--worktree", "--source=HEAD", "--", *in_head)
+    if added_only:  # a file git has never committed: unstage and delete it
+        run_git(repo_root, "rm", "-f", "-q", "--", *added_only)
     if untracked:
         run_git(repo_root, "clean", "-f", "-q", "--", *untracked)
 
@@ -450,7 +463,9 @@ def create_branch(repo_root: Path, name: str, start: str | None = None) -> None:
 
 
 def checkout(repo_root: Path, name: str) -> None:
-    run_git(repo_root, "checkout", "-q", END, _ref(name))
+    # `git switch` never interprets its argument as a pathspec, so a file name
+    # can never be "checked out" (which would silently discard local edits).
+    run_git(repo_root, "switch", "-q", "--no-guess", END, _ref(name))
 
 
 def delete_branch(repo_root: Path, name: str, force: bool = False) -> None:

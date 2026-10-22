@@ -82,7 +82,9 @@ token and opens it in your browser. The page has the GitKraken-style layout:
 workspaces and branches on the left, the commit graph in the middle, diffs and
 details on the right, and proposals, events and terminals at the bottom.
 
-What you can do there: stage, unstage and discard files; commit (with amend);
+What you can do there: stage, unstage and discard files ("discard" drops both
+the staged and the working-tree change, and deletes files git has never
+committed); commit (with amend);
 create, switch and delete local branches; fetch, pull and push; open terminal
 tabs; read the credentials panel; and run the whole assistant loop (initialize,
 index, propose, apply with tests, commit, reject, revert).

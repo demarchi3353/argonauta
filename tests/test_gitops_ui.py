@@ -133,3 +133,25 @@ def test_refs_starting_with_dash_are_not_treated_as_flags(repo, call):
     with pytest.raises(gitops.GitError):
         call(repo)
     assert not Path("/tmp/argonauta-smuggled").exists()
+
+
+def test_checkout_never_treats_a_file_path_as_a_branch(repo):
+    (repo / "README.md").write_text("local edit\n")
+    with pytest.raises(gitops.GitError):
+        gitops.checkout(repo, "README.md")
+    assert (repo / "README.md").read_text() == "local edit\n"  # untouched
+
+
+def test_discard_drops_staged_changes_and_added_files(repo):
+    (repo / "README.md").write_text("staged edit\n")
+    (repo / "added.txt").write_text("brand new\n")
+    git(repo, "add", "README.md", "added.txt")
+    gitops.discard(repo, ["README.md", "added.txt"])
+    assert gitops.status_detail(repo) == []
+    assert "staged edit" not in (repo / "README.md").read_text()
+    assert not (repo / "added.txt").exists()
+
+
+def test_run_git_in_a_file_path_is_a_git_error(repo):
+    with pytest.raises(gitops.GitError, match="cannot run git"):
+        gitops.repo_toplevel(repo / "README.md")

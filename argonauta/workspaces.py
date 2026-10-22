@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -74,9 +75,10 @@ class Registry:
     def __init__(self, path: Path):
         self.path = path
         self.workspaces: list[Workspace] = []
+        self._lock = threading.RLock()  # request threads mutate and save concurrently
 
     # ----- persistence -----
-    def load(self) -> None:
+    def _load_unlocked(self) -> None:
         if not self.path.is_file():
             self.workspaces = []
             return
@@ -98,7 +100,7 @@ class Registry:
             out.append(Workspace(id=w["id"], name=w["name"], repos=repos))
         self.workspaces = out
 
-    def save(self) -> None:
+    def _save_unlocked(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"version": VERSION, "workspaces": [
             {"id": w.id, "name": w.name, "repos": [{"id": r.id, "path": str(r.path), "name": r.name} for r in w.repos]}
@@ -131,13 +133,13 @@ class Registry:
         return None
 
     # ----- mutations -----
-    def add_workspace(self, name: str) -> Workspace:
+    def _add_workspace_unlocked(self, name: str) -> Workspace:
         ws = Workspace(id="w_" + secrets.token_hex(4), name=_clean_name(name))
         self.workspaces.append(ws)
         self.save()
         return ws
 
-    def rename_workspace(self, workspace_id: str, name: str) -> Workspace:
+    def _rename_workspace_unlocked(self, workspace_id: str, name: str) -> Workspace:
         ws = self.get_workspace(workspace_id)
         if ws is None:
             raise RegistryError(f"no workspace {workspace_id}")
@@ -145,14 +147,14 @@ class Registry:
         self.save()
         return ws
 
-    def remove_workspace(self, workspace_id: str) -> None:
+    def _remove_workspace_unlocked(self, workspace_id: str) -> None:
         ws = self.get_workspace(workspace_id)
         if ws is None:
             raise RegistryError(f"no workspace {workspace_id}")
         self.workspaces.remove(ws)
         self.save()
 
-    def add_repo(self, workspace_id: str, path: Path) -> Repo:
+    def _add_repo_unlocked(self, workspace_id: str, path: Path) -> Repo:
         ws = self.get_workspace(workspace_id)
         if ws is None:
             raise RegistryError(f"no workspace {workspace_id}")
@@ -167,7 +169,7 @@ class Registry:
         self.save()
         return repo
 
-    def remove_repo(self, repo_id: str) -> None:
+    def _remove_repo_unlocked(self, repo_id: str) -> None:
         for w in self.workspaces:
             for r in w.repos:
                 if r.id == repo_id:
@@ -176,7 +178,7 @@ class Registry:
                     return
         raise RegistryError(f"no repository {repo_id}")
 
-    def ensure_repo(self, path: Path) -> Repo:
+    def _ensure_repo_unlocked(self, path: Path) -> Repo:
         top = gitops.repo_toplevel(Path(path))
         existing = self.find_repo_by_path(top)
         if existing is not None:
@@ -185,6 +187,38 @@ class Registry:
         if default is None:
             default = self.add_workspace(DEFAULT_WORKSPACE)
         return self.add_repo(default.id, top)
+
+    def load(self):
+        with self._lock:
+            return self._load_unlocked()
+
+    def save(self):
+        with self._lock:
+            return self._save_unlocked()
+
+    def add_workspace(self, name: str):
+        with self._lock:
+            return self._add_workspace_unlocked(name)
+
+    def rename_workspace(self, workspace_id: str, name: str):
+        with self._lock:
+            return self._rename_workspace_unlocked(workspace_id, name)
+
+    def remove_workspace(self, workspace_id: str):
+        with self._lock:
+            return self._remove_workspace_unlocked(workspace_id)
+
+    def add_repo(self, workspace_id: str, path: Path):
+        with self._lock:
+            return self._add_repo_unlocked(workspace_id, path)
+
+    def remove_repo(self, repo_id: str):
+        with self._lock:
+            return self._remove_repo_unlocked(repo_id)
+
+    def ensure_repo(self, path: Path):
+        with self._lock:
+            return self._ensure_repo_unlocked(path)
 
 
 def open_registry() -> Registry:
