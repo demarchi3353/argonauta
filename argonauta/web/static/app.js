@@ -6,9 +6,11 @@
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const LANES = ["--lane0", "--lane1", "--lane2", "--lane3", "--lane4", "--lane5"];
   const SIG = { good: "✓", bad: "✗", good_untrusted: "~", expired_signature: "⌛", expired_key: "⌛", revoked: "✗", unknown_key: "?", unsigned: "·" };
+  const ic = (name) => '<svg class="ic" aria-hidden="true"><use href="#' + name + '"/></svg>';
+  const REPO_BUTTONS = ["btn-fetch", "btn-pull", "btn-push", "btn-terminal", "btn-credentials", "btn-new-branch", "btn-stage-all", "btn-unstage-all", "btn-commit"];
 
   const S = {
-    token: null, workspaces: [], repoId: null, state: null, graph: [], proposals: [], events: [],
+    token: null, workspaces: [], workspaceId: null, repoId: null, stateSeq: 0, state: null, graph: [], proposals: [], events: [],
     selection: null, rightTab: "detail", bottomTab: "proposals", terminals: new Map(), busy: new Set(), filter: "", pollTimer: null,
   };
 
@@ -52,11 +54,16 @@
   }
   function setBusy(key, on) {
     if (on) S.busy.add(key); else S.busy.delete(key);
+    const noRepo = !S.repoId;
     const anyRemote = ["fetch", "pull", "push"].some((k) => S.busy.has(k));
-    ["fetch", "pull", "push"].forEach((k) => { const b = $("#btn-" + k); b.disabled = anyRemote; b.innerHTML = S.busy.has(k) ? '<span class="spinner"></span>' + k[0].toUpperCase() + k.slice(1) : k[0].toUpperCase() + k.slice(1); });
+    ["fetch", "pull", "push"].forEach((k) => { const b = $("#btn-" + k); b.disabled = anyRemote || noRepo; b.innerHTML = (S.busy.has(k) ? '<span class="spinner"></span>' : ic("i-" + k)) + k[0].toUpperCase() + k.slice(1); });
     const assistantBusy = ["index", "propose", "test", "apply"].some((k) => S.busy.has(k));
     ["propose", "index", "test"].forEach((k) => { const b = $("#btn-" + k); if (b) b.disabled = assistantBusy; });
-    $("#btn-commit").disabled = S.busy.has("commit");
+    $("#btn-commit").disabled = S.busy.has("commit") || noRepo;
+  }
+  function setRepoControls(enabled, reason) {
+    REPO_BUTTONS.forEach((id) => { const b = $("#" + id); if (!b) return; b.disabled = !enabled; b.title = enabled ? "" : reason; });
+    $("#commit-message").disabled = !enabled; $("#commit-filter").disabled = !enabled;
   }
 
   // ----- jobs ------------------------------------------------------------------------------
@@ -102,16 +109,18 @@
   function renderWorkspaces() {
     const wsSel = $("#workspace-select"), repoSel = $("#repo-select"), tree = $("#workspace-list");
     wsSel.innerHTML = S.workspaces.map((w) => '<option value="' + esc(w.id) + '">' + esc(w.name) + "</option>").join("");
-    const current = S.workspaces.find((w) => w.repos.some((r) => r.id === S.repoId)) || S.workspaces[0];
-    if (current) wsSel.value = current.id;
+    const current = S.workspaces.find((w) => w.id === S.workspaceId) || S.workspaces.find((w) => w.repos.some((r) => r.id === S.repoId)) || S.workspaces[0];
+    if (current) { wsSel.value = current.id; S.workspaceId = current.id; }
     repoSel.innerHTML = (current ? current.repos : []).map((r) => '<option value="' + esc(r.id) + '"' + (r.exists ? "" : " disabled") + ">" + esc(r.name) + (r.exists ? "" : " (missing)") + "</option>").join("");
     if (S.repoId) repoSel.value = S.repoId;
-    tree.innerHTML = S.workspaces.map((w) => '<li class="ws" role="treeitem" aria-expanded="true">' + esc(w.name) + ' <button class="btn mini" data-del-ws="' + esc(w.id) + '" aria-label="Remove workspace ' + esc(w.name) + '">×</button></li>' +
-      w.repos.map((r) => '<li class="repo' + (r.id === S.repoId ? " active" : "") + (r.exists ? "" : " missing") + '" role="treeitem" tabindex="0" data-repo="' + esc(r.id) + '" title="' + esc(r.path) + '">' + esc(r.name) + (r.exists ? "" : " (missing)") + ' <button class="btn mini" data-del-repo="' + esc(r.id) + '" data-ws="' + esc(w.id) + '" aria-label="Remove repository ' + esc(r.name) + '">×</button></li>').join("")).join("");
+    tree.innerHTML = S.workspaces.map((w) => '<li class="ws" role="treeitem" aria-expanded="true">' + ic("i-folder") + esc(w.name) + ' <button class="btn mini ghost" data-del-ws="' + esc(w.id) + '" aria-label="Remove workspace ' + esc(w.name) + '" title="Remove workspace">' + ic("i-x") + '</button></li>' +
+      (w.repos.length ? "" : '<li class="repo muted" role="treeitem"><em>empty: use “+ Repo” to add a repository</em></li>') +
+      w.repos.map((r) => '<li class="repo' + (r.id === S.repoId ? " active" : "") + (r.exists ? "" : " missing") + '" role="treeitem" tabindex="0" data-repo="' + esc(r.id) + '" title="' + esc(r.path) + '">' + ic("i-repo") + esc(r.name) + (r.exists ? "" : " (missing)") + ' <button class="btn mini ghost" data-del-repo="' + esc(r.id) + '" data-ws="' + esc(w.id) + '" aria-label="Remove repository ' + esc(r.name) + '" title="Remove from workspace">' + ic("i-x") + '</button></li>').join("")).join("");
     if (!S.workspaces.length) tree.innerHTML = '<li class="empty">No workspaces. Click “+ Workspace”, then “+ Repo”.</li>';
   }
   async function selectRepo(id) {
-    S.repoId = id; S.selection = null; S.graph = []; S.proposals = [];
+    S.repoId = id; S.selection = null; S.graph = []; S.proposals = []; S.stateSeq++;
+    const owner = S.workspaces.find((w) => w.repos.some((r) => r.id === id)); if (owner) S.workspaceId = owner.id;
     try { localStorage.setItem("argonauta.repo", id); } catch (e) { /* ignore */ }
     renderWorkspaces(); renderDetail();
     await refreshAll();
@@ -119,8 +128,12 @@
 
   // ----- state and graph -------------------------------------------------------------------
   async function refreshState() {
+    const seq = S.stateSeq;
     if (!S.repoId) { S.state = null; renderState(); return; }
-    try { S.state = await api("GET", rp("/state")); } catch (err) { S.state = null; toast("bad", "State: " + err.message); }
+    let next = null;
+    try { next = await api("GET", rp("/state")); } catch (err) { if (seq === S.stateSeq) toast("bad", "State: " + err.message); }
+    if (seq !== S.stateSeq) return;  // the user switched repository meanwhile; this answer is stale
+    S.state = next;
     renderState();
   }
   async function refreshGraph() {
@@ -142,12 +155,22 @@
     const st = S.state;
     $("#branch-pill").textContent = st ? (st.branch + (st.upstream ? " → " + st.upstream + " (" + st.ahead + "↑ " + st.behind + "↓)" : " (no upstream)")) : "no repository";
     const bl = $("#branch-list"), rl = $("#remote-branch-list");
-    if (!st) { bl.innerHTML = ""; rl.innerHTML = ""; renderChanges(null); $("#store-missing").hidden = true; $("#assistant").hidden = true; return; }
+    const noRepoBox = $("#no-repo");
+    if (!st) {
+      bl.innerHTML = ""; rl.innerHTML = ""; renderChanges(null); $("#store-missing").hidden = true; $("#assistant").hidden = true;
+      const ws = S.workspaces.find((w) => w.id === $("#workspace-select").value);
+      $("#no-repo-text").textContent = ws && !ws.repos.length ? 'Workspace “' + ws.name + '” has no repositories yet. Terminals, branches, commits and the assistant all belong to a repository.' : "No repository selected. Pick one in the sidebar.";
+      noRepoBox.hidden = false; $("#graph-empty").hidden = true;
+      setRepoControls(false, "Select or add a repository first");
+      return;
+    }
+    noRepoBox.hidden = true;
+    setRepoControls(true, "");
     const locals = st.branches.filter((b) => !b.remote), remotes = st.branches.filter((b) => b.remote);
-    bl.innerHTML = locals.map((b) => '<li role="option" tabindex="0" aria-selected="' + b.is_current + '" data-branch="' + esc(b.name) + '"><span class="name">' + (b.is_current ? "● " : "○ ") + esc(b.name) + "</span>" +
+    bl.innerHTML = locals.map((b) => '<li role="option" tabindex="0" aria-selected="' + b.is_current + '" data-branch="' + esc(b.name) + '" title="' + (b.is_current ? "current branch" : "click to check out") + '">' + ic(b.is_current ? "i-check" : "i-branch") + '<span class="name">' + esc(b.name) + "</span>" +
       (b.upstream ? '<span class="badge" title="ahead/behind upstream">' + b.ahead + "↑" + b.behind + "↓" + (b.gone ? " gone" : "") + "</span>" : "") +
-      (b.is_current ? "" : '<button class="btn mini" data-del-branch="' + esc(b.name) + '" aria-label="Delete branch ' + esc(b.name) + '">×</button>') + "</li>").join("") || '<li class="muted">No local branches yet.</li>';
-    rl.innerHTML = remotes.map((b) => '<li role="option" tabindex="0" aria-selected="false" data-remote-branch="' + esc(b.name) + '"><span class="name">' + esc(b.name) + '</span><span class="badge">' + esc(b.sha) + "</span></li>").join("") || '<li class="muted">No remote branches (' + (st.remotes.length ? st.remotes.map((r) => r.name).join(", ") : "no remotes") + ").</li>";
+      (b.is_current ? "" : '<button class="btn mini ghost" data-del-branch="' + esc(b.name) + '" aria-label="Delete branch ' + esc(b.name) + '" title="Delete branch">' + ic("i-trash") + '</button>') + "</li>").join("") || '<li class="muted">No local branches yet.</li>';
+    rl.innerHTML = remotes.map((b) => '<li role="option" tabindex="0" aria-selected="false" data-remote-branch="' + esc(b.name) + '" title="click to check out a tracking branch">' + ic("i-cloud") + '<span class="name">' + esc(b.name) + '</span><span class="badge">' + esc(b.sha) + "</span></li>").join("") || '<li class="muted">No remote branches (' + (st.remotes.length ? esc(st.remotes.map((r) => r.name).join(", ")) : "no remotes") + ").</li>";
     renderChanges(st.status);
     const store = st.store;
     $("#store-missing").hidden = store.initialized; $("#assistant").hidden = !store.initialized;
@@ -164,14 +187,14 @@
     $("#changes-count").textContent = total ? total + " changed" : ""; $("#changes-empty").hidden = total > 0;
     const conflicts = $("#conflicts"); conflicts.hidden = !status.conflicted.length;
     conflicts.textContent = status.conflicted.length ? "Conflicts in: " + status.conflicted.map((e) => e.path).join(", ") + ". Resolve them with git, then stage." : "";
-    const row = (e, area, code) => '<li><input type="checkbox" aria-label="' + (area === "index" ? "Unstage " : "Stage ") + esc(e.path) + '" data-toggle="' + area + '" data-path="' + esc(e.path) + '"' + (area === "index" ? " checked" : "") + '><span class="code ' + esc(code) + '">' + esc(code) + '</span><button type="button" class="path" data-diff="' + area + '" data-path="' + esc(e.path) + '">' + esc(e.path) + '</button><button type="button" class="btn mini" data-discard="' + esc(e.path) + '" aria-label="Discard changes in ' + esc(e.path) + '">discard</button></li>';
+    const row = (e, area, code) => '<li><input type="checkbox" aria-label="' + (area === "index" ? "Unstage " : "Stage ") + esc(e.path) + '" data-toggle="' + area + '" data-path="' + esc(e.path) + '"' + (area === "index" ? " checked" : "") + '><span class="code ' + esc(code) + '">' + esc(code) + '</span><button type="button" class="path" data-diff="' + area + '" data-path="' + esc(e.path) + '">' + esc(e.path) + '</button><button type="button" class="btn mini ghost" data-discard="' + esc(e.path) + '" aria-label="Discard changes in ' + esc(e.path) + '" title="Discard changes">' + ic("i-undo") + '</button></li>';
     staged.innerHTML = status.staged.map((e) => row(e, "index", e.index)).join("") || '<li class="muted">Nothing staged.</li>';
     unstaged.innerHTML = status.unstaged.map((e) => row(e, "worktree", e.worktree)).concat(status.untracked.map((e) => row(e, "worktree", "?"))).join("") || '<li class="muted">No unstaged changes.</li>';
   }
 
   function renderGraph() {
     const box = $("#graph"), rows = S.filter ? S.graph.filter((c) => (c.subject + " " + c.author + " " + c.sha + " " + c.refs.join(" ")).toLowerCase().includes(S.filter)) : S.graph;
-    $("#graph-empty").hidden = S.graph.length > 0; $("#graph-count").textContent = S.graph.length ? rows.length + " of " + S.graph.length : "";
+    $("#graph-empty").hidden = S.graph.length > 0 || !S.repoId; $("#graph-count").textContent = S.graph.length ? rows.length + " of " + S.graph.length : "";
     const maxLane = rows.reduce((m, c) => Math.max(m, c.lane, ...(c.parent_lanes || []), c.active.length - 1), 0);
     const laneW = 14, rowH = 28, x = (l) => 10 + l * laneW, y = (i) => i * rowH + rowH / 2;
     box.style.setProperty("--lanes-width", (x(maxLane) + 14) + "px");
@@ -231,7 +254,7 @@
       const d = await api("GET", rp("/proposals/" + pid)); const p = d.proposal, ch = d.change, runs = d.test_runs;
       const can = { apply: p.status === "proposed", reject: ["proposed", "invalid"].includes(p.status), revert: p.status === "applied" && ch && !ch.reverted_at, commit: p.status === "applied" && ch && !ch.commit_sha };
       pane.innerHTML = "<h2>Proposal #" + p.id + (p.is_sample ? " [SAMPLE]" : "") + "</h2><dl class='kv'><dt>status</dt><dd>" + esc(p.status) + "</dd><dt>task</dt><dd>" + esc(p.task) + "</dd><dt>provider</dt><dd>" + esc(p.provider + " / " + p.model) + "</dd><dt>context</dt><dd>" + esc(p.context_files.join(", ") || "(none)") + "</dd>" + (p.notes ? "<dt>notes</dt><dd>" + esc(p.notes) + "</dd>" : "") + (ch ? "<dt>change</dt><dd>" + ch.files.length + " files, +" + ch.insertions + " −" + ch.deletions + (ch.commit_sha ? ", commit " + esc(ch.commit_sha.slice(0, 10)) : ", not committed") + (ch.reverted_at ? ", reverted" : "") + "</dd>" : "") + "</dl>" +
-        '<div class="row">' + (can.apply ? '<label class="check"><input type="checkbox" id="apply-test" checked> run tests</label><label class="check"><input type="checkbox" id="apply-commit" checked> commit on green</label><button class="btn primary" data-prop-apply="' + p.id + '">Apply</button>' : "") + (can.reject ? '<button class="btn" data-prop-reject="' + p.id + '">Reject</button>' : "") + (can.commit ? '<button class="btn" data-prop-commit="' + p.id + '">Commit</button>' : "") + (can.revert ? '<button class="btn danger" data-prop-revert="' + p.id + '">Revert</button>' : "") + "</div>" +
+        '<div class="row">' + (can.apply ? '<label class="check"><input type="checkbox" id="apply-test" checked> run tests</label><label class="check"><input type="checkbox" id="apply-commit" checked> commit on green</label><button class="btn primary" data-prop-apply="' + p.id + '">' + ic("i-check") + 'Apply</button>' : "") + (can.reject ? '<button class="btn" data-prop-reject="' + p.id + '">' + ic("i-x") + 'Reject</button>' : "") + (can.commit ? '<button class="btn" data-prop-commit="' + p.id + '">' + ic("i-commit") + 'Commit</button>' : "") + (can.revert ? '<button class="btn danger" data-prop-revert="' + p.id + '">' + ic("i-undo") + 'Revert</button>' : "") + "</div>" +
         (p.explanation ? "<p>" + esc(p.explanation).replace(/\n/g, "<br>") + "</p>" : "") + diffHtml(p.diff) +
         (runs.length ? "<h3>Test runs</h3><table class='table'><thead><tr><th>#</th><th>status</th><th>exit</th><th>finished</th></tr></thead><tbody>" + runs.map((r) => "<tr><td>" + r.id + "</td><td class='status-" + (r.status === "passed" ? "ok" : "bad") + "'>" + esc(r.status) + "</td><td>" + esc(r.exit_code) + "</td><td>" + esc(r.finished_at) + "</td></tr>").join("") + "</tbody></table>" + (runs[0].status !== "passed" && runs[0].output_tail ? "<pre class='diff'>" + esc(runs[0].output_tail) + "</pre>" : "") : "");
     } catch (err) { pane.innerHTML = '<div class="empty">✗ ' + esc(err.message) + "</div>"; }
@@ -255,18 +278,22 @@
   // ----- assistant -----------------------------------------------------------------------
   function renderAssistant() {
     const table = $("#proposals-table"), body = $("tbody", table);
-    $("#proposals-empty").hidden = S.proposals.length > 0 || !(S.state && S.state.store.initialized); table.hidden = !S.proposals.length;
+    const emptyBox = $("#proposals-empty");
+    if (!S.repoId) { emptyBox.textContent = "Select a repository to use the assistant."; emptyBox.hidden = false; }
+    else { emptyBox.textContent = "No proposals yet. Describe a change above."; emptyBox.hidden = S.proposals.length > 0 || !(S.state && S.state.store.initialized); }
+    table.hidden = !S.proposals.length;
     body.innerHTML = S.proposals.map((p) => "<tr tabindex='0' data-prop='" + p.id + "'><td>" + p.id + "</td><td>" + esc(p.status) + "</td><td>" + (p.last_test ? esc(p.last_test.status) : "–") + "</td><td>" + (p.change && p.change.commit_sha ? esc(p.change.commit_sha.slice(0, 8)) : "–") + "</td><td>" + esc(p.task) + "</td></tr>").join("");
     $("tbody", $("#events-table")).innerHTML = S.events.map((e) => "<tr><td>" + esc(e.ts.slice(0, 19).replace("T", " ")) + "</td><td>" + esc(e.kind) + "</td><td>" + esc(e.message) + "</td></tr>").join("") || "<tr><td colspan='3' class='muted'>No events yet.</td></tr>";
   }
 
   // ----- terminals -----------------------------------------------------------------------
   async function openTerminal() {
-    if (!S.repoId) { toast("warn", "Select a repository first."); return; }
+    if (!S.repoId) { toast("warn", "Terminals belong to a repository: select one in the sidebar, or add one to this workspace with “+ Repo”."); return; }
     let data;
     try { data = await api("POST", rp("/terminals"), { cols: 120, rows: 30 }); } catch (err) { toast("bad", "Terminal: " + err.message); return; }
     const t = data.terminal, tabs = $("#bottom-tabs");
-    const tab = document.createElement("button"); tab.className = "tab"; tab.setAttribute("role", "tab"); tab.dataset.tab = "term-" + t.id; tab.innerHTML = "Terminal <span class='close' aria-label='Close terminal'>×</span>"; tabs.appendChild(tab);
+    const tab = document.createElement("button"); tab.className = "tab"; tab.setAttribute("role", "tab"); tab.dataset.tab = "term-" + t.id; const repoName = (S.workspaces.flatMap((w) => w.repos).find((r) => r.id === S.repoId) || { name: "" }).name;
+    tab.innerHTML = ic("i-terminal") + esc(repoName || "Terminal") + " <span class='close' aria-label='Close terminal' title='Close terminal'>×</span>"; tab.title = "Terminal in " + repoName; tabs.appendChild(tab);
     const pane = document.createElement("div"); pane.id = "pane-term-" + t.id; pane.className = "pane term-pane"; pane.setAttribute("role", "tabpanel"); pane.hidden = true; $("#terminal-panes").appendChild(pane);
     const term = new Terminal({ cursorBlink: true, fontSize: 13, theme: { background: "#000000" } }); const fit = new FitAddon.FitAddon(); term.loadAddon(fit); term.open(pane);
     const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws/terminals/" + t.id); ws.binaryType = "arraybuffer";
@@ -303,7 +330,7 @@
 
   // ----- event wiring -----------------------------------------------------------------------
   function wire() {
-    $("#workspace-select").addEventListener("change", (ev) => { const w = S.workspaces.find((x) => x.id === ev.target.value); const r = w && w.repos.find((x) => x.exists); if (r) selectRepo(r.id); else { S.repoId = null; renderWorkspaces(); refreshAll(); } });
+    $("#workspace-select").addEventListener("change", (ev) => { S.workspaceId = ev.target.value; const w = S.workspaces.find((x) => x.id === ev.target.value); const r = w && w.repos.find((x) => x.exists); if (r) selectRepo(r.id); else { S.repoId = null; S.stateSeq++; S.selection = null; renderDetail(); renderWorkspaces(); refreshAll(); } });
     $("#repo-select").addEventListener("change", (ev) => selectRepo(ev.target.value));
     $("#workspace-list").addEventListener("click", async (ev) => {
       const del = ev.target.closest("[data-del-repo]"), delWs = ev.target.closest("[data-del-ws]"), repo = ev.target.closest("[data-repo]");
@@ -313,6 +340,7 @@
     });
     $("#workspace-list").addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.target.dataset.repo) selectRepo(ev.target.dataset.repo); });
     $("#btn-add-workspace").addEventListener("click", async () => { const name = await dialog("New workspace", "", { input: "Name", ok: "Create" }); if (name) { try { await api("POST", "/api/workspaces", { name }); await loadWorkspaces(); toast("ok", "Workspace created"); } catch (e) { toast("bad", e.message); } } });
+    $("#btn-add-repo-2").addEventListener("click", () => $("#btn-add-repo").click());
     $("#btn-add-repo").addEventListener("click", async () => {
       if (!S.workspaces.length) { toast("warn", "Create a workspace first."); return; }
       const wid = $("#workspace-select").value || S.workspaces[0].id;
