@@ -103,11 +103,14 @@ h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacin
 .tree, .list, .files { list-style: none; margin: 0; padding: 0; }
 .tree li, .list li { padding: 3px 6px; border-radius: var(--radius); cursor: pointer; display: flex; gap: 6px; align-items: center; }
 .tree li.ws { font-weight: 600; cursor: default; margin-top: 4px; }
-.tree li.repo { padding-left: 18px; }
+.tree li.repo { padding-left: 18px; cursor: default; }
+.tree .repo-name { flex: 1; min-width: 0; display: flex; align-items: center; padding: 0; border: 0; border-radius: var(--radius); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.tree .repo-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree .repo-name[aria-disabled="true"] { cursor: not-allowed; }
 .tree li.repo.missing { color: var(--bad); }
 .tree li.repo.wt { padding-left: 34px; }
 .tree li.repo.wt .wt-branch { color: var(--muted); font-size: 11px; margin-left: 2px; }
-.tree li.repo .btn.ghost { margin-left: auto; opacity: 0; }
+.tree li.repo .btn.ghost { opacity: 0; }
 .tree li.repo:hover .btn.ghost, .tree li.repo:focus-within .btn.ghost, .tree li.repo.active .btn.ghost { opacity: 1; }
 .list li[aria-selected="true"], .tree li.active { background: var(--sel); }
 .list li .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 12px; }

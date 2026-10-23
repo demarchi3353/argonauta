@@ -134,7 +134,10 @@ def test_accessibility_pass_fixes():
     js = (STATIC / "app.js").read_text()
     for key in ("branches", "changes", "proposals", "credentials"):  # rail toggles start unpressed
         assert f'aria-pressed="false" data-rail="{key}"' in html, key
-    assert 'role="menu"' not in html and "menuitem" not in js and 'role="tree"' in html
+    # the switcher is a plain list: repo names are buttons, row actions are sibling buttons
+    assert 'role="menu"' not in html and "menuitem" not in js and 'role="tree"' not in html and "treeitem" not in js
+    assert '<button type="button" class="repo-name" data-repo="' in js and 'aria-current="true"' in js
+    assert "ev.target.isConnected" in js  # a click on the re-rendered switcher label is not an outside click
     assert "--on-warn:" in css and "color: #fff;" not in css
     assert ".btn.ghost .ic" not in css and "border-radius: 8px" not in css
     assert "changeCount: 0" in js and 'selectTab("inspector", S.inspectorTab)' in js
