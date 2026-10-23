@@ -72,9 +72,11 @@ h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacin
 .btn.ghost { border-color: transparent; background: transparent; }
 .btn.ghost:hover { background: var(--bg-3); }
 .btn.icon { width: 30px; padding: 0; }
-.layout { display: grid; grid-template-columns: 44px 240px minmax(320px, 1fr) minmax(360px, 42%); grid-template-rows: 1fr; min-height: 0; }
+.layout { display: grid; grid-template-columns: 44px auto minmax(320px, 1fr) minmax(360px, 42%); grid-template-rows: 1fr; min-height: 0; }
+/* explicit slots so a hidden aside does not shift the other columns */
+@media (min-width: 1024px) { .layout > .rail { grid-column: 1; } .layout > .side { grid-column: 2; } .layout > .center { grid-column: 3; } .layout > .inspector { grid-column: 4; } }
 .side, .center, .inspector { min-height: 0; overflow: auto; background: var(--bg-1); }
-.side { padding: 10px 12px; border-right: 1px solid var(--line); }
+.side { width: 240px; padding: 10px 12px; border-right: 1px solid var(--line); }
 .center { display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; border-right: 1px solid var(--line); }
 .graph-scroll { min-height: 0; overflow: auto; }
 /* rail: 44px icon column, top and bottom groups */

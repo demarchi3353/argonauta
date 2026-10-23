@@ -80,3 +80,13 @@ def test_bottom_panel_lives_under_the_graph():
     assert 'id="bottom"' in center and 'id="bottom-strip"' in center and 'aria-expanded' in center
     assert 'id="terminal-panes"' in center and 'id="pane-events"' in center
     assert 'data-tab="proposals"' not in center
+
+
+def test_branches_side_panel():
+    html = (STATIC / "index.html").read_text()
+    js = (STATIC / "app.js").read_text()
+    side = html.split('id="side-branches"', 1)[1].split('id="center"', 1)[0]
+    assert 'id="branch-list"' in side and 'id="remote-branch-list"' in side and 'id="btn-new-branch"' in side
+    assert 'id="side-branches" class="side" hidden' in html and 'class="box"' not in side
+    assert 'data-rail="branches" aria-label' in html and 'aria-pressed="true" data-rail="branches"' not in html
+    assert "function toggleSidePanel" in js and "sidePanel: null" in js

@@ -62,7 +62,7 @@
   <nav id="rail" class="rail" aria-label="Tools">
     <div class="rail-group">
     <button class="btn icon ghost" type="button" data-rail="repos" aria-label="Repositories" title="Repositories"><svg class="ic lg" aria-hidden="true"><use href="#i-repo"/></svg></button>
-    <button class="btn icon ghost" type="button" aria-pressed="true" data-rail="branches" aria-label="Branches" title="Branches"><svg class="ic lg" aria-hidden="true"><use href="#i-branch"/></svg></button>
+    <button class="btn icon ghost" type="button" aria-pressed="false" data-rail="branches" aria-label="Branches" title="Branches"><svg class="ic lg" aria-hidden="true"><use href="#i-branch"/></svg></button>
     <button class="btn icon ghost" type="button" data-rail="changes" aria-label="Changes" title="Changes"><svg class="ic lg" aria-hidden="true"><use href="#i-commit"/></svg><span class="badge warn" id="badge-changes" hidden></span></button>
     <button class="btn icon ghost" type="button" data-rail="proposals" aria-label="Proposals" title="Proposals"><svg class="ic lg" aria-hidden="true"><use href="#i-zap"/></svg><span class="badge warn" id="badge-proposals" hidden></span></button>
     <button class="btn icon ghost" type="button" data-rail="terminal" aria-label="New terminal" title="New terminal"><svg class="ic lg" aria-hidden="true"><use href="#i-terminal"/></svg></button>
@@ -74,8 +74,8 @@
     </div>
   </nav>
 
-  <aside id="side-branches" class="side" aria-label="Branches">
-    <div class="box-head"><h2 id="h-branches">Branches</h2><button class="btn mini" id="btn-new-branch" type="button"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Branch</button></div>
+  <aside id="side-branches" class="side" hidden aria-label="Branches">
+    <div class="box-head"><h2 id="h-branches" class="title">Branches</h2><button class="btn mini ghost" id="btn-new-branch" type="button"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Branch</button></div>
     <ul id="branch-list" class="list" role="listbox" aria-label="Local branches"></ul>
     <h3 class="label"><svg class="ic" aria-hidden="true"><use href="#i-cloud"/></svg>Remotes</h3>
     <ul id="remote-branch-list" class="list" role="listbox" aria-label="Remote branches"></ul>

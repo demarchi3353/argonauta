@@ -11,7 +11,7 @@
 
   const S = {
     token: null, workspaces: [], workspaceId: null, repoId: null, stateSeq: 0, state: null, graph: [], proposals: [], events: [],
-    selection: null, inspectorTab: "detail", bottomTab: "events", bottomOpen: false, terminals: new Map(), busy: new Set(), filter: "", pollTimer: null,
+    selection: null, inspectorTab: "detail", bottomTab: "events", bottomOpen: false, sidePanel: null, terminals: new Map(), busy: new Set(), filter: "", pollTimer: null,
   };
 
   // ----- token and api -----------------------------------------------------------------
@@ -456,6 +456,13 @@
     set("badge-changes", n ? String(n) : ""); set("count-changes", n ? String(n) : "");
     set("badge-proposals", busy ? "…" : ""); set("count-proposals", S.proposals.length ? String(S.proposals.length) : "");
   }
+  function toggleSidePanel(name) {
+    const open = S.sidePanel !== name; S.sidePanel = open ? name : null;
+    const panel = $("#side-" + name), btn = $('[data-rail="' + name + '"]');
+    panel.hidden = !open; btn.setAttribute("aria-pressed", String(open));
+    if (open) { const f = panel.querySelector("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])"); if (f) f.focus(); }
+    else btn.focus();
+  }
   function onRail(ev) {
     const b = ev.target.closest("[data-rail]"); if (!b) return; const k = b.dataset.rail;
     if (k === "repos") { if ($("#repo-menu").open) closeRepoMenu(); else openRepoMenu(b); }
@@ -464,7 +471,7 @@
     else if (k === "terminal") openTerminal();
     else if (k === "events") openBottom("events");
     else if (k === "model") openModelDialog();
-    // "branches" stays a no-op until the panel gets its toggle
+    else if (k === "branches") toggleSidePanel("branches");
   }
   function onInspectorKey(ev) {
     if (ev.key !== "ArrowLeft" && ev.key !== "ArrowRight") return; const t = ev.target.closest(".tab"); if (!t) return;
@@ -559,6 +566,7 @@
     });
     document.addEventListener("keydown", (ev) => {
       const tag = (ev.target.tagName || "").toLowerCase(); if (["input", "textarea", "select"].includes(tag) || ev.target.closest(".xterm") || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+      if (ev.key === "Escape") { if (S.sidePanel && !document.querySelector("dialog[open]")) { ev.preventDefault(); toggleSidePanel(S.sidePanel); } return; }
       const num = ["1", "2", "3", "4"].indexOf(ev.key); if (num >= 0) { ev.preventDefault(); if (ev.key === "4") showCredentials(); else selectTab("inspector", INSPECTOR_TABS[num]); return; }
       if (ev.key === "p") { ev.preventDefault(); selectTab("inspector", "proposals"); $("#task").focus(); } if (ev.key === "c") { ev.preventDefault(); selectTab("inspector", "changes"); $("#commit-message").focus(); } if (ev.key === "t") { ev.preventDefault(); openTerminal(); } if (ev.key === "/") { ev.preventDefault(); $("#commit-filter").focus(); } if (ev.key === "?") { ev.preventDefault(); $("#help").showModal(); }
     });
