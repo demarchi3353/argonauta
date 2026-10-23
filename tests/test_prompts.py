@@ -66,6 +66,7 @@ def test_parse_review_reply_accepts_fenced_json_with_prose_around_it():
     assert [f["title"] for f in parsed.findings] == ["Early return is fine", "Missed null check"]
     assert parsed.findings[0]["line"] == 312 and parsed.findings[0]["verdict"] == "disagree"
     assert parsed.findings[1]["severity"] == "high" and "verdict" not in parsed.findings[1]
+    assert parsed.findings[0]["kind"] == "verdict" and parsed.findings[1]["kind"] == "finding"
 
 
 def test_parse_review_reply_bare_object_and_garbage():
@@ -79,3 +80,20 @@ def test_parse_review_reply_bare_object_and_garbage():
 def test_review_bundle_has_both_prompts():
     bundle = review_bundle(_review_req())
     assert REVIEW_SYSTEM_PROMPT in bundle and "<mode>" in bundle and "argonauta" in bundle.lower()
+
+
+def test_review_system_prompt_flags_tone_in_draft_reviews():
+    assert "tone" in REVIEW_SYSTEM_PROMPT
+    flat = " ".join(REVIEW_SYSTEM_PROMPT.split())
+    assert "phrased in a way the pull request's author would reasonably resent" in flat
+
+
+def test_parse_review_reply_ignores_objects_inside_failed_fences():
+    text = '```json\n{"broken": {"title": "x"}, oops}\n```\nThen: {"summary": "s", "findings": []}'
+    parsed = parse_review_reply(text)
+    assert parsed.ok and parsed.summary == "s" and parsed.findings == []
+
+
+def test_parse_review_reply_accepts_integral_float_line():
+    parsed = parse_review_reply('{"summary": "s", "findings": [{"title": "t", "line": 312.0}, {"title": "u", "line": 3.5}]}')
+    assert [f["line"] for f in parsed.findings] == [312, None]

@@ -114,7 +114,11 @@ Each request starts with a <mode> section and works in one of three modes:
 - mine: critique the owner's own draft review, given under <draft>, against the diff. Judge each
   point of the draft with a verdict: sound (correct and worth raising), weak (vague, minor or
   not well supported) or wrong (contradicted by the diff). Also report significant problems the
-  draft overlooks, as findings with a severity.
+  draft overlooks, as findings with a severity. Address the critique plainly to the owner: be
+  direct about what is wrong or weak and give the reason, never vague and never padded. Also
+  watch the tone of each point. When a point is phrased in a way the pull request's author would
+  reasonably resent (sarcasm, blame, absolutes, commands without reasons), add a short "tone" note
+  to that finding's body saying what to soften and why, without changing the technical verdict.
 
 Other sections you may see: <source> (what is being reviewed), <omitted_files> and
 <diff omitted="all"> (content that was left out; do not guess about it, and say when a verdict
@@ -235,24 +239,30 @@ _SEVERITIES = {"high", "medium", "low"}
 
 
 def _first_json_object(text: str) -> dict | None:
+    candidates: list[dict] = []
+    masked = text
     for m in _FENCE_RE.finditer(text):
+        masked = masked[: m.start()] + " " * (m.end() - m.start()) + masked[m.end():]
         try:
             obj = json.loads(m.group(1))
         except ValueError:
             continue
         if isinstance(obj, dict):
-            return obj
+            candidates.append(obj)
     decoder = json.JSONDecoder()
-    pos = text.find("{")
+    pos = masked.find("{")
     while pos >= 0:
         try:
-            obj, _ = decoder.raw_decode(text, pos)
+            obj, end = decoder.raw_decode(masked, pos)
         except ValueError:
-            obj = None
+            obj, end = None, pos + 1
         if isinstance(obj, dict):
+            candidates.append(obj)
+        pos = masked.find("{", end)
+    for obj in candidates:
+        if "findings" in obj or "summary" in obj:
             return obj
-        pos = text.find("{", pos + 1)
-    return None
+    return candidates[0] if candidates else None
 
 
 def _as_int(value: object) -> int | None:
@@ -260,6 +270,8 @@ def _as_int(value: object) -> int | None:
         return None
     if isinstance(value, int):
         return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
     if isinstance(value, str) and re.fullmatch(r"\s*\d+\s*", value):
         return int(value)
     return None
@@ -273,13 +285,14 @@ def _clean_finding(raw: object) -> dict | None:
         return None
     body = raw.get("body")
     out: dict = {"title": title.strip(), "body": body if isinstance(body, str) else ""}
-    for key in ("kind", "path", "author", "quote"):
+    for key in ("path", "author", "quote"):
         if isinstance(raw.get(key), str):
             out[key] = raw[key]
     for key, allowed in (("verdict", _VERDICTS), ("severity", _SEVERITIES)):
         value = raw.get(key)
         if isinstance(value, str) and value.strip().lower() in allowed:
             out[key] = value.strip().lower()
+    out["kind"] = "verdict" if "verdict" in out else "finding"
     out["line"] = _as_int(raw.get("line"))
     return out
 
