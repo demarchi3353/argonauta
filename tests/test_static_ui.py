@@ -8,8 +8,8 @@ ALLOWED_URL_PREFIXES = ("http://127.0.0.1", "http://localhost", "http://www.w3.o
 
 
 def test_ids_bound_in_app_js_exist_in_index_html():
-    html = (STATIC / "index.html").read_text()
-    js = (STATIC / "app.js").read_text()
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    js = (STATIC / "app.js").read_text(encoding="utf-8")
     html_ids = set(re.findall(r'\bid="([A-Za-z0-9_-]+)"', html))
     # `$("#id")`, `$$("#id …")`; a trailing `-` (as in `"#btn-" + k`) is not an id
     bound = set(re.findall(r"""\$\$?\(\s*['"]#([A-Za-z0-9_-]*[A-Za-z0-9])(?=['"\s\[])""", js))
@@ -18,8 +18,8 @@ def test_ids_bound_in_app_js_exist_in_index_html():
 
 
 def test_index_has_brand_and_no_external_urls():
-    html = (STATIC / "index.html").read_text()
-    css = (STATIC / "app.css").read_text()
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    css = (STATIC / "app.css").read_text(encoding="utf-8")
     assert "Argonauta" in html
     urls = re.findall(r"https?://[^\s\"'<>]+", html + css)
     external = [u for u in urls if not u.startswith(ALLOWED_URL_PREFIXES)]
@@ -27,7 +27,7 @@ def test_index_has_brand_and_no_external_urls():
 
 
 def test_css_declares_slate_tokens_in_both_schemes():
-    css = (STATIC / "app.css").read_text()
+    css = (STATIC / "app.css").read_text(encoding="utf-8")
     for token, dark in (("--bg-0", "#0f172a"), ("--bg-1", "#131c30"), ("--bg-2", "#1b2336"), ("--bg-3", "#272f42"),
                         ("--line", "#2b3650"), ("--text", "#f1f5f9"), ("--muted", "#94a3b8"), ("--accent", "#22c55e"),
                         ("--warn", "#f97316"), ("--bad", "#ef4444"), ("--focus", "#fbbf24")):
@@ -41,7 +41,7 @@ def test_css_declares_slate_tokens_in_both_schemes():
 
 
 def test_topbar_structure():
-    html = (STATIC / "index.html").read_text()
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
     assert 'id="repo-switch"' in html and 'aria-haspopup="dialog"' in html
     assert 'id="repo-menu"' in html and 'id="workspace-list"' in html
     assert 'id="workspace-select"' not in html and 'id="repo-select"' not in html
@@ -53,7 +53,7 @@ def test_topbar_structure():
 
 
 def test_rail_and_inspector_structure():
-    html = (STATIC / "index.html").read_text()
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
     for key in ("repos", "branches", "changes", "proposals", "terminal", "events", "model", "credentials"):
         assert f'data-rail="{key}"' in html, key
     assert 'id="badge-changes"' in html and 'id="badge-proposals"' in html
@@ -67,7 +67,7 @@ def test_rail_and_inspector_structure():
 
 
 def test_shortcuts_ignore_text_fields():
-    js = (STATIC / "app.js").read_text()
+    js = (STATIC / "app.js").read_text(encoding="utf-8")
     guard = js.split('document.addEventListener("keydown"', 1)[1].split('"visibilitychange"', 1)[0]
     assert '"input", "textarea", "select"' in guard and ".xterm" in guard
     for key in ('"1"', '"2"', '"3"', '"4"'):
@@ -75,7 +75,7 @@ def test_shortcuts_ignore_text_fields():
 
 
 def test_bottom_panel_lives_under_the_graph():
-    html = (STATIC / "index.html").read_text()
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
     center = html.split('id="center"', 1)[1].split('class="inspector"', 1)[0]
     assert 'id="bottom"' in center and 'id="bottom-strip"' in center and 'aria-expanded' in center
     assert 'id="terminal-panes"' in center and 'id="pane-events"' in center
@@ -83,8 +83,8 @@ def test_bottom_panel_lives_under_the_graph():
 
 
 def test_branches_side_panel():
-    html = (STATIC / "index.html").read_text()
-    js = (STATIC / "app.js").read_text()
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    js = (STATIC / "app.js").read_text(encoding="utf-8")
     side = html.split('id="side-branches"', 1)[1].split('id="center"', 1)[0]
     assert 'id="branch-list"' in side and 'id="remote-branch-list"' in side and 'id="btn-new-branch"' in side
     assert 'id="side-branches" class="side" hidden' in html and 'class="box"' not in side
@@ -93,8 +93,8 @@ def test_branches_side_panel():
 
 
 def test_diff_view_markup_and_handlers():
-    html = (STATIC / "index.html").read_text()
-    js = (STATIC / "app.js").read_text()
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    js = (STATIC / "app.js").read_text(encoding="utf-8")
     center = html.split('id="center"', 1)[1].split('class="inspector"', 1)[0]
     for i in ("diff-view", "btn-diff-back", "diff-title", "diff-sub", "diff-actions", "diff-body"):
         assert f'id="{i}"' in center, i
@@ -108,9 +108,9 @@ def test_diff_view_markup_and_handlers():
 
 
 def test_copy_and_help_updated():
-    html = (STATIC / "index.html").read_text()
-    js = (STATIC / "app.js").read_text()
-    readme = (STATIC.parent.parent.parent / "README.md").read_text()
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    js = (STATIC / "app.js").read_text(encoding="utf-8")
+    readme = (STATIC.parent.parent.parent / "README.md").read_text(encoding="utf-8")
     assert "sidebar" not in js and "sidebar" not in html.lower().split("<dialog", 1)[0]
     assert "<dt>1–4</dt>" in html or "<dt>1-4</dt>" in html
     assert 'class="logo-hero" src="/logo.png" alt="" width="96" height="96"' in html
@@ -120,7 +120,7 @@ def test_copy_and_help_updated():
 
 
 def test_icon_only_controls_have_labels():
-    html = (STATIC / "index.html").read_text()
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
     for m in re.finditer(r'<button[^>]*class="[^"]*\bicon\b[^"]*"[^>]*>', html):
         assert 'aria-label="' in m.group(0), m.group(0)
     unlabeled = re.findall(r'<svg class="ic[^"]*"(?![^>]*aria-hidden="true")[^>]*>', html)
@@ -129,9 +129,9 @@ def test_icon_only_controls_have_labels():
 
 
 def test_accessibility_pass_fixes():
-    html = (STATIC / "index.html").read_text()
-    css = (STATIC / "app.css").read_text()
-    js = (STATIC / "app.js").read_text()
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    css = (STATIC / "app.css").read_text(encoding="utf-8")
+    js = (STATIC / "app.js").read_text(encoding="utf-8")
     for key in ("branches", "changes", "proposals", "credentials"):  # rail toggles start unpressed
         assert f'aria-pressed="false" data-rail="{key}"' in html, key
     # the switcher is a plain list: repo names are buttons, row actions are sibling buttons

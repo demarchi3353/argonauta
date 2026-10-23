@@ -37,7 +37,7 @@
   <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></symbol>
   <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></symbol>
 </svg>
-<a class="skip" href="#graph-panel">Skip to commit graph</a>
+<a class="skip" href="#center">Skip to commit graph</a>
 <header class="topbar" role="banner">
   <div class="brand" id="brand"><img class="logo" src="/logo.png" alt="" width="34" height="34">Argonauta</div>
   <button id="repo-switch" class="btn switcher" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="repo-menu" title="Switch repository"><svg class="ic" aria-hidden="true"><use href="#i-repo"/></svg><span id="repo-switch-label">No repository</span><svg class="ic xs" aria-hidden="true" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
@@ -81,11 +81,12 @@
     <ul id="remote-branch-list" class="list" role="listbox" aria-label="Remote branches"></ul>
   </aside>
 
-  <section class="center" id="center" aria-label="Commit graph">
+  <section class="center" id="center" aria-label="Commit graph" tabindex="-1">
     <div id="graph-area">
       <div class="box-head sticky">
         <h2><svg class="ic" aria-hidden="true"><use href="#i-commit"/></svg>Commits</h2>
         <span id="graph-count" class="muted"></span>
+        <button class="btn ghost" id="btn-new-branch-2" type="button" title="New branch from the current HEAD"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Branch</button>
       </div>
       <div class="graph-scroll" id="graph-panel" tabindex="-1">
         <div id="graph-empty" class="empty" hidden>No commits yet. Stage files and commit to start the graph.</div>
