@@ -84,3 +84,22 @@ def test_open_requires_init(tmp_path):
     s = Store.open(tmp_path / "new.db", create=True)
     s.close()
     assert (tmp_path / "new.db").is_file()
+
+
+def test_reviews_round_trip(tmp_path):
+    store = Store.open(tmp_path / "s.db", create=True)
+    r = store.create_review(mode="received", source_kind="pr", source_ref="3", source_label="PR #3", source_diff="diff --git a/x b/x\n", omitted_files=["big.bin"],
+                            comments=[{"author": "alice", "body": "hm", "path": "x", "line": 1}], draft="", provider="scripted", model="scripted", status="ok",
+                            summary="1 disagree", findings=[{"kind": "verdict", "verdict": "disagree", "title": "t", "body": "b"}], raw="{}", input_tokens=10, output_tokens=5)
+    assert r.id == 1 and r.omitted_files == ["big.bin"] and r.comments[0]["author"] == "alice" and r.findings[0]["verdict"] == "disagree"
+    assert store.get_review(1).summary == "1 disagree"
+    store.create_review(mode="code", source_kind="worktree", source_ref="", source_label="Working tree", source_diff="", omitted_files=[], comments=[], draft="", provider="manual", model="manual", status="unparsed", summary="", findings=[], raw="prose")
+    assert [x.id for x in store.list_reviews()] == [2, 1]
+    with pytest.raises(StoreError):
+        store.get_review(9)
+    with pytest.raises(StoreError):
+        store.create_review(mode="bogus", source_kind="pr", source_ref="1", source_label="", source_diff="", omitted_files=[], comments=[], draft="", provider="p", model="m", status="ok", summary="", findings=[], raw="")
+    assert len(store.raw_rows("reviews")) == 2
+    store.clear_records()
+    assert store.list_reviews() == []
+    store.close()
