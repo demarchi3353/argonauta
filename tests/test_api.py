@@ -404,7 +404,7 @@ def test_review_routes(api, monkeypatch, tmp_path):
     assert api.get("/api/github/status")[1]["installed"] in (True, False)
     assert api.get(f"{r}/github/prs")[0] == 409  # no origin
     git(repo.path, "remote", "add", "origin", "git@github.com:o/r.git")
-    monkeypatch.setenv("ARGONAUTA_GH_BIN", str(fake_gh(tmp_path, {"pr list": '[{"number": 3, "title": "T", "author": {"login": "me"}, "headRefName": "b", "updatedAt": "x"}]', "auth status": "", "api user": '"me"'})))
+    monkeypatch.setenv("ARGONAUTA_GH_BIN", str(fake_gh(tmp_path, {"pr list": '[{"number": 3, "title": "T", "author": {"login": "me"}, "headRefName": "b", "updatedAt": "x"}]', "api user": '"me"'})))
     status, data = api.get(f"{r}/github/prs")
     assert status == 200 and data["origin"] == "o/r" and data["prs"][0]["number"] == 3
     assert api.get(f"{r}/state")[1]["store"]["review_sources"]["branch_base"] in ("main", "master")

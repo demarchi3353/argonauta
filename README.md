@@ -246,8 +246,9 @@ model".
 
 Pull requests are read through your own `gh` CLI, run by the server, never by
 the page, with the login from `gh auth login` and read-only commands only
-(`auth status`, `pr list/view/diff`, GET requests for review comments). The
-tab shows whether `gh` is installed and logged in. Argonauta never publishes
+(`api user`, `pr list/view/diff`, GET requests for review comments). The
+tab shows whether `gh` is installed and logged in (the active account, as
+`gh api user` sees it), and lists the repository's open pull requests. Argonauta never publishes
 anything to GitHub: no comments, no reviews, no approvals; you copy what you
 want to keep.
 

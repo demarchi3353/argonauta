@@ -186,3 +186,12 @@ def test_review_tab_keyboard_and_selection_polish():
     assert render.count('#review-mode [data-mode]') == 1  # one loop sets the mode buttons
     readme = (STATIC.parent.parent.parent / "README.md").read_text(encoding="utf-8")
     assert "any file diff" in readme
+
+
+def test_review_acceptance_fixes():
+    js = (STATIC / "app.js").read_text(encoding="utf-8")
+    render = js.split("function renderReviewTab", 1)[1].split("\n  function ", 1)[0]
+    assert '"gh is not installed"' in render and "gh auth login" in render  # the PR option's title names the actual reason
+    readme = (STATIC.parent.parent.parent / "README.md").read_text(encoding="utf-8")
+    gh_par = readme.split("Pull requests are read through", 1)[1].split("\n\n", 1)[0]
+    assert "auth status" not in gh_par and "`api user`" in gh_par and "open pull requests" in gh_par

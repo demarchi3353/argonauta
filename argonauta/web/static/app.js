@@ -616,7 +616,7 @@
     if (!avail[R.source]) R.source = "worktree";
     if (!reviewModeOk(R.mode)) R.mode = "code";
     $$("#review-source [data-source]").forEach((b) => { const s = b.dataset.source; b.disabled = !hasRepo || !avail[s]; b.setAttribute("aria-checked", String(R.source === s));
-      b.title = !avail[s] ? (s === "commit" ? "Select a commit in the graph first" : s === "branch" ? (rs.branch_base ? "" : "No base branch found") : "gh must be installed and logged in") : ""; });
+      b.title = !avail[s] ? (s === "commit" ? "Select a commit in the graph first" : s === "branch" ? (rs.branch_base ? "" : "No base branch found") : gh.installed ? "gh is not logged in (run gh auth login)" : "gh is not installed") : ""; });
     let note = "";
     if (R.source === "commit") { const c = S.graph.find((x) => x.sha === commit); note = commit ? (c ? c.short + " " + c.subject : commit.slice(0, 7)) : "Select a commit in the graph."; }
     else if (R.source === "branch") note = rs.branch_base && st ? st.branch + " vs " + rs.branch_base : "No base branch (main, master or the upstream default) was found.";
