@@ -173,6 +173,30 @@ h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacin
 #diff-actions { margin-left: auto; display: flex; gap: 6px; }
 #diff-body { min-height: 0; overflow: auto; padding: 12px; }
 #diff-body .diff { overflow: visible; min-width: max-content; }
+/* report: a stored review replaces the graph in the centre; findings are cards */
+.report-view { display: grid; grid-template-rows: auto 1fr; min-height: 0; }
+#report-title { font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; }
+#report-sub { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.report { min-height: 0; overflow: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+.report-summary { margin: 0; font-size: 14px; line-height: 1.5; color: var(--text); white-space: pre-wrap; max-width: 80ch; }
+.report-summary.unparsed { color: var(--warn); } .report-summary.failed { color: var(--bad); }
+#report-body { display: flex; flex-direction: column; gap: 10px; }
+.report-raw { padding: 8px; white-space: pre-wrap; }
+.report-omitted { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+.finding { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--bg-1); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; max-width: 100ch; }
+.finding.has-path { cursor: pointer; }
+.finding.has-path:hover { border-color: var(--accent); }
+.finding-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.finding-path { font-family: var(--font-mono); font-size: 12px; color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.finding-body { margin: 0; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+.finding-quote { margin: 0; padding: 4px 10px; border-left: 3px solid var(--line); color: var(--muted); font-size: 13px; white-space: pre-wrap; }
+.finding-quote cite { display: block; font-style: normal; font-size: 11px; font-weight: 600; margin-bottom: 2px; }
+.finding-quote cite::after { content: " wrote:"; font-weight: 400; }
+.badge.verdict, .badge.sev { font-weight: 600; letter-spacing: .04em; }
+.verdict.agree, .verdict.sound { border-color: var(--ok); color: var(--ok); }
+.verdict.partly, .verdict.weak, .sev.medium { border-color: var(--warn); color: var(--warn); }
+.verdict.disagree, .verdict.wrong, .sev.high { border-color: var(--bad); color: var(--bad); }
+.pill.warn { border-color: var(--warn); color: var(--warn); margin-top: 0; }
 .cfiles { list-style: none; margin: 6px 0; padding: 0; }
 .cfile { display: grid; grid-template-columns: 1.4em 1fr auto; gap: 6px; align-items: center; width: 100%; padding: 3px 4px; border: 0; border-radius: var(--radius); background: none; color: var(--text); cursor: pointer; text-align: left; font: inherit; }
 .cfile:hover, .cfile[aria-current="true"] { background: color-mix(in srgb, var(--accent) 10%, transparent); }

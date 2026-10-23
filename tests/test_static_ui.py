@@ -159,3 +159,13 @@ def test_review_tab_structure():
     assert "<dt>5</dt>" in html or "<dt>1-5</dt>" in html or "<dt>1–5</dt>" in html
     repo_fn = js.split("async function selectRepo", 1)[1].split("async function", 1)[0]
     assert "S.prs = null" in repo_fn and "S.review.pr = null" in repo_fn  # the PR list belongs to one repository
+
+
+def test_report_view_markup_and_handlers():
+    html = (STATIC / "index.html").read_text(encoding="utf-8"); js = (STATIC / "app.js").read_text(encoding="utf-8")
+    center = html.split('id="center"', 1)[1].split('class="inspector"', 1)[0]
+    for i in ("report-view", "btn-report-back", "report-title", "report-sub", "report-summary", "report-body"): assert f'id="{i}"' in center, i
+    assert "function openReport" in js and "function closeReport" in js and 'kind: "review"' in js
+    assert "Not sent to the model" in js and "ignored the format" in js
+    readme = (STATIC.parent.parent.parent / "README.md").read_text(encoding="utf-8")
+    assert "### Review" in readme and "gh" in readme.split("### Review", 1)[1][:3000]

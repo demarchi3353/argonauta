@@ -11,7 +11,7 @@
 
   const S = {
     token: null, workspaces: [], workspaceId: null, repoId: null, stateSeq: 0, state: null, graph: [], proposals: [], events: [],
-    selection: null, openDiff: null, detail: null, diffSeq: 0, graphScroll: 0, inspectorTab: "detail", bottomTab: "events", bottomOpen: false, sidePanel: null, terminals: new Map(), busy: new Set(), filter: "", pollTimer: null, changeCount: 0,
+    selection: null, openDiff: null, openReport: null, reportSeq: 0, detail: null, diffSeq: 0, graphScroll: 0, inspectorTab: "detail", bottomTab: "events", bottomOpen: false, sidePanel: null, terminals: new Map(), busy: new Set(), filter: "", pollTimer: null, changeCount: 0,
     reviews: [], prs: null, prsOrigin: null, prsError: null, reviewSel: null, review: { source: "worktree", mode: "code", pr: null },
   };
 
@@ -132,7 +132,7 @@
     if (!S.workspaces.length) tree.innerHTML = '<li class="empty">No workspaces. Use “+ Workspace”, then “+ Repo”.</li>';
   }
   async function selectRepo(id) {
-    S.repoId = id; S.selection = null; S.detail = null; S.graph = []; S.proposals = []; S.stateSeq++; closeDiffView();
+    S.repoId = id; S.selection = null; S.detail = null; S.graph = []; S.proposals = []; S.stateSeq++; closeReport(); closeDiffView();
     S.prs = null; S.prsOrigin = null; S.prsError = null; S.review.pr = null; S.reviewSel = null; S.reviews = []; $("#review-pr").dataset.html = ""; $("#review-error").textContent = "";
     const owner = S.workspaces.find((w) => w.repos.some((r) => r.id === id)); if (owner) S.workspaceId = owner.id;
     try { localStorage.setItem("argonauta.repo", id); } catch (e) { /* ignore */ }
@@ -283,18 +283,20 @@
     }).join("") + "</div>";
   }
   function openDiffView(spec) {
+    if (spec.kind === "review" && spec.text === undefined) { showReviewDiff(spec); return; }
     const wasOpen = !!S.openDiff;
-    if (!wasOpen) S.graphScroll = $("#graph-panel").scrollTop;
+    if (!wasOpen && !S.openReport) S.graphScroll = $("#graph-panel").scrollTop; // with a report open the graph is already hidden
     S.openDiff = spec;
     const short = spec.sha ? spec.sha.slice(0, 7) : "";
-    const sub = { worktree: "working tree", index: "staged", commit: short, proposal: "Proposal #" + spec.pid, patch: spec.sha ? short : "Proposal #" + spec.pid }[spec.kind];
+    const sub = { worktree: "working tree", index: "staged", commit: short, proposal: "Proposal #" + spec.pid, patch: spec.sha ? short : "Proposal #" + spec.pid, review: "Review #" + spec.rid }[spec.kind];
     $("#diff-title").textContent = spec.kind === "patch" ? "Whole patch" : spec.path;
     $("#diff-title").title = spec.kind === "patch" ? "" : spec.path;
     $("#diff-sub").innerHTML = (spec.status ? '<span class="code ' + esc(spec.status) + '">' + esc(spec.status) + "</span> " : "") + esc(sub);
     $("#diff-actions").innerHTML = spec.kind === "worktree" ? '<button class="btn" type="button" data-stage="' + esc(spec.path) + '">' + ic("i-plus") + "Stage</button>"
       : spec.kind === "index" ? '<button class="btn" type="button" data-unstage="' + esc(spec.path) + '">' + ic("i-undo") + "Unstage</button>" : "";
     const body = $("#diff-body"); body.innerHTML = diffHtml(spec.text); body.scrollTop = 0; body.scrollLeft = 0;
-    $("#graph-area").hidden = true; $("#diff-view").hidden = false;
+    $("#graph-area").hidden = true; $("#report-view").hidden = true; $("#diff-view").hidden = false;
+    const back = $("#btn-diff-back"); back.textContent = S.openReport ? "← Review #" + S.openReport.rid : "← Commits"; back.title = S.openReport ? "Back to the review report (Esc)" : "Back to the commit graph (Esc)";
     // move focus into the view on open, and after a re-render dropped it (the Stage button is replaced)
     const ae = document.activeElement; if (!wasOpen || !ae || ae === document.body) $("#btn-diff-back").focus({ preventScroll: true });
     markCfile();
@@ -304,10 +306,10 @@
     if (!S.openDiff) return;
     const hadFocus = $("#diff-view").contains(document.activeElement);
     S.openDiff = null;
-    $("#diff-view").hidden = true; $("#graph-area").hidden = false;
+    $("#diff-view").hidden = true;
     $("#diff-body").innerHTML = ""; $("#diff-actions").innerHTML = "";
-    $("#graph-panel").scrollTop = S.graphScroll;
-    if (hadFocus) $("#graph-panel").focus({ preventScroll: true });
+    if (S.openReport) { $("#report-view").hidden = false; if (hadFocus) $("#btn-report-back").focus({ preventScroll: true }); } // a diff opened over a report returns to it
+    else { $("#graph-area").hidden = false; $("#graph-panel").scrollTop = S.graphScroll; if (hadFocus) $("#graph-panel").focus({ preventScroll: true }); }
     markCfile();
   }
   // the open diff came from the commit or proposal shown in Detail (a file chunk or its whole patch)
@@ -325,6 +327,69 @@
   }
   // staging an untracked file adds it; unstaging an added file leaves it untracked
   function movedStatus(status, target) { return target === "index" && status === "?" ? "A" : target === "worktree" && status === "A" ? "?" : status; }
+
+  // ----- report view: a stored review replaces the graph in the centre ------------------------
+  const MODE_LABELS = { code: "Code review", received: "Received review", mine: "My review" };
+  const VERDICTS = ["agree", "partly", "disagree", "sound", "weak", "wrong"], SEVERITIES = ["high", "medium", "low"];
+  async function openReport(id) {
+    const seq = ++S.reportSeq, repo = S.repoId;
+    let review;
+    try { review = (await api("GET", rp("/reviews/" + encodeURIComponent(id)))).review; }
+    catch (err) { if (seq === S.reportSeq) toast("bad", err.message); return; }
+    if (seq !== S.reportSeq || repo !== S.repoId) return;
+    if (S.openDiff) { S.diffSeq++; S.openDiff = null; $("#diff-view").hidden = true; $("#diff-body").innerHTML = ""; $("#diff-actions").innerHTML = ""; markCfile(); } // the graph scroll was stored when it opened
+    else if (!S.openReport) S.graphScroll = $("#graph-panel").scrollTop;
+    S.openReport = { rid: review.id };
+    renderReport(review);
+    $("#graph-area").hidden = true; $("#report-view").hidden = false;
+    $("#report-scroll").scrollTop = 0;
+    $("#btn-report-back").focus({ preventScroll: true });
+  }
+  function reportFileOmitted(review, path) {
+    return (review.omitted_files || []).includes(path) || (review.comments || []).some((c) => c && c.file_omitted && c.path === path);
+  }
+  function findingHtml(review, f) {
+    const verdict = f.kind === "verdict" && VERDICTS.includes(f.verdict) ? f.verdict : null, sev = !verdict && SEVERITIES.includes(f.severity) ? f.severity : null;
+    const badge = verdict ? '<span class="badge verdict ' + verdict + '">' + verdict.toUpperCase() + "</span>" : sev ? '<span class="badge sev ' + sev + '">' + sev.toUpperCase() + "</span>" : "";
+    const loc = f.path ? f.path + (f.line ? ":" + f.line : "") : "";
+    const where = f.path ? '<button type="button" class="finding-path" data-rpath="' + esc(f.path) + '" title="Open the diff of ' + esc(f.path) + '">' + esc(loc) + "</button>" : "";
+    const omitted = f.path && reportFileOmitted(review, f.path) ? '<span class="pill warn" title="This file was not in the diff sent to the model">File not sent</span>' : "";
+    const quote = f.quote ? '<blockquote class="finding-quote">' + (f.author ? '<cite>' + esc(f.author) + "</cite>" : "") + esc(f.quote) + "</blockquote>" : "";
+    return '<article class="finding' + (f.path ? " has-path" : "") + '"' + (f.path ? ' data-rpath="' + esc(f.path) + '"' : "") + '><div class="finding-head">' + badge + where + omitted + "</div>" + quote +
+      '<div class="title">' + esc(f.title) + "</div>" + (f.body ? '<p class="finding-body">' + esc(f.body) + "</p>" : "") + "</article>";
+  }
+  function renderReport(review) {
+    $("#report-title").textContent = "Review #" + review.id;
+    const who = (review.provider || "") + (review.model ? "/" + review.model : "");
+    $("#report-sub").textContent = [MODE_LABELS[review.mode] || review.mode, review.source_label || review.source_kind, who, relTime(review.created_at)].filter(Boolean).join(" · ");
+    $("#report-sub").title = review.created_at || "";
+    const sum = $("#report-summary");
+    sum.className = "report-summary" + (review.status === "ok" ? "" : " " + review.status);
+    sum.textContent = review.status === "unparsed" ? "The model ignored the format; raw reply below"
+      : review.status === "failed" ? "The provider failed: " + (review.raw || "") : review.summary || "";
+    let html = "";
+    if (review.status === "unparsed") html = '<pre class="diff report-raw">' + esc(review.raw || "") + "</pre>";
+    else if (review.status === "ok") html = (review.findings || []).length ? (review.findings || []).map((f) => findingHtml(review, f)).join("") : '<div class="empty">No findings.</div>';
+    const om = review.omitted_files || [];
+    if (om.length) html += '<p class="report-omitted">Not sent to the model: ' + om.map((p) => '<span class="mono">' + esc(p) + "</span>").join(", ") + "</p>";
+    $("#report-body").innerHTML = html;
+  }
+  function closeReport() {
+    S.reportSeq++; // drop any report still loading
+    if (!S.openReport) return;
+    const hadFocus = $("#report-view").contains(document.activeElement) || $("#diff-view").contains(document.activeElement);
+    S.openReport = null;
+    if (S.openDiff) closeDiffView(); // a review file diff goes with its report
+    $("#report-view").hidden = true; $("#graph-area").hidden = false;
+    $("#report-body").innerHTML = ""; $("#report-summary").textContent = "";
+    $("#graph-panel").scrollTop = S.graphScroll;
+    if (hadFocus) $("#graph-panel").focus({ preventScroll: true });
+  }
+  async function showReviewDiff(spec) {
+    const seq = ++S.diffSeq;
+    try { const d = await api("GET", rp("/reviews/" + encodeURIComponent(spec.rid) + "/diff?path=" + encodeURIComponent(spec.path))); if (seq === S.diffSeq && S.openReport && S.openReport.rid === spec.rid) openDiffView(Object.assign({}, spec, { text: d.diff })); }
+    catch (err) { if (seq === S.diffSeq) toast("bad", err.status === 404 ? spec.path + " is not in the reviewed diff" : err.message); }
+  }
 
   // ----- right pane ----------------------------------------------------------------------
   const RTF = typeof Intl !== "undefined" && Intl.RelativeTimeFormat ? new Intl.RelativeTimeFormat("en", { numeric: "auto" }) : null;
@@ -749,6 +814,12 @@
       await refreshAll(); showProposal(pid);
     });
     $("#btn-diff-back").addEventListener("click", () => closeDiffView());
+    $("#btn-report-back").addEventListener("click", () => closeReport());
+    $("#report-body").addEventListener("click", (ev) => {
+      const card = ev.target.closest("[data-rpath]"); if (!card || !S.openReport) return;
+      if (!ev.target.closest("button") && !window.getSelection().isCollapsed) return; // selecting text in a card is not a click
+      openDiffView({ kind: "review", rid: S.openReport.rid, path: card.dataset.rpath, status: "" });
+    });
     $("#diff-actions").addEventListener("click", async (ev) => {
       const b = ev.target.closest("[data-stage], [data-unstage]"); if (!b) return;
       const stage = b.hasAttribute("data-stage"), path = stage ? b.dataset.stage : b.dataset.unstage; b.disabled = true;
@@ -759,8 +830,8 @@
     });
     document.addEventListener("keydown", (ev) => {
       if (ev.target.closest(".xterm") || ev.metaKey || ev.ctrlKey || ev.altKey) return;
-      // Escape leaves the diff view or the branches panel even from a text field (the filter, the commit message)
-      if (ev.key === "Escape") { if (document.querySelector("dialog[open]")) return; if (S.openDiff) { ev.preventDefault(); closeDiffView(); } else if (S.sidePanel) { ev.preventDefault(); toggleSidePanel(S.sidePanel); } return; }
+      // Escape leaves the diff view, the report or the branches panel even from a text field (the filter, the commit message)
+      if (ev.key === "Escape") { if (document.querySelector("dialog[open]")) return; if (S.openDiff) { ev.preventDefault(); closeDiffView(); } else if (S.openReport) { ev.preventDefault(); closeReport(); } else if (S.sidePanel) { ev.preventDefault(); toggleSidePanel(S.sidePanel); } return; }
       const tag = (ev.target.tagName || "").toLowerCase(); if (["input", "textarea", "select"].includes(tag)) return;
       const num = ["1", "2", "3", "4", "5"].indexOf(ev.key); if (num >= 0) { ev.preventDefault(); if (ev.key === "4") showCredentials(); else selectTab("inspector", INSPECTOR_TABS[num]); return; }
       if (ev.key === "r") { ev.preventDefault(); selectTab("inspector", "review"); renderReviewTab(); const d = $("#review-draft"); (S.review.mode === "mine" ? d : $("#btn-review-run")).focus(); return; }

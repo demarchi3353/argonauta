@@ -105,6 +105,17 @@
       </div>
       <div id="diff-body"></div>
     </div>
+    <div id="report-view" class="report-view" hidden>
+      <div class="diff-head">
+        <button class="btn ghost" id="btn-report-back" type="button" title="Back to the commit graph (Esc)">← Commits</button>
+        <span id="report-title"></span>
+        <span id="report-sub" class="muted"></span>
+      </div>
+      <div class="report" id="report-scroll">
+        <p id="report-summary"></p>
+        <div id="report-body"></div>
+      </div>
+    </div>
   <section class="bottom" id="bottom" aria-label="Terminals and events">
     <button class="strip" id="bottom-strip" type="button" aria-expanded="false" aria-controls="bottom-body"><svg class="ic" aria-hidden="true"><use href="#i-terminal"/></svg><span id="bottom-strip-label">Terminals (0) · Events</span></button>
     <div class="bottom-body" id="bottom-body">
@@ -279,7 +290,7 @@
       <dt>c</dt><dd>Open Changes and focus the commit message</dd>
       <dt>t</dt><dd>Open a new terminal tab</dd>
       <dt>/</dt><dd>Filter commits</dd>
-      <dt>Esc</dt><dd>Close dialogs, the diff view, the branches panel and menus</dd>
+      <dt>Esc</dt><dd>Close dialogs, the diff view, the review report, the branches panel and menus</dd>
       <dt>?</dt><dd>This help</dd>
     </dl>
     <div class="row end"><button class="btn primary" value="close" type="submit">Close</button></div>
