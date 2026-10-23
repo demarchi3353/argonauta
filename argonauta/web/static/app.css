@@ -266,3 +266,21 @@ h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacin
 /* motion: 120ms transitions only when motion is allowed, spinner slowed otherwise */
 @media (prefers-reduced-motion: no-preference) { .btn, .tab, .opt, .tree li, .list li, .files li, .cfile, .table tbody tr, .graph .row-c { transition: background-color .12s ease, color .12s ease; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
+
+/* review tab: source and mode pickers, history */
+.review-form { display: flex; flex-direction: column; gap: 8px; }
+.review-form .row { display: flex; gap: 6px; align-items: center; }
+.review-form select, .review-form textarea { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-0); color: var(--text); }
+.review-form textarea { resize: vertical; font-family: var(--font-mono); font-size: 12px; }
+.seg-group { display: flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--bg-0); }
+.seg { flex: 1 1 auto; padding: 5px 10px; border: 0; border-right: 1px solid var(--line); background: none; cursor: pointer; color: var(--muted); }
+.seg:last-child { border-right: 0; }
+.seg:hover:not(:disabled) { background: var(--bg-2); color: var(--text); }
+.seg[aria-checked="true"] { background: var(--sel); color: var(--text); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
+.seg:disabled { opacity: .45; cursor: not-allowed; }
+.hist { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.hist-row { display: grid; grid-template-columns: 3.2em 5.5em 1fr auto auto auto; gap: 8px; align-items: baseline; width: 100%; text-align: left; padding: 5px 8px; border: 1px solid transparent; border-radius: var(--radius); background: none; cursor: pointer; font-size: 12px; }
+.hist-row:hover { background: var(--bg-2); }
+.hist-row[aria-pressed="true"] { background: var(--sel); border-color: var(--line); }
+.hist-src { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hist-status.failed { color: var(--bad); } .hist-status.manual { color: var(--warn); }

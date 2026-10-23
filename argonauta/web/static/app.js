@@ -7,11 +7,12 @@
   const LANES = ["--lane0", "--lane1", "--lane2", "--lane3", "--lane4", "--lane5"];
   const SIG = { good: "✓", bad: "✗", good_untrusted: "~", expired_signature: "⌛", expired_key: "⌛", revoked: "✗", unknown_key: "?", unsigned: "·" };
   const ic = (name) => '<svg class="ic" aria-hidden="true"><use href="#' + name + '"/></svg>';
-  const REPO_BUTTONS = ["btn-fetch", "btn-pull", "btn-push", "btn-new-branch", "btn-new-branch-2", "btn-stage-all", "btn-unstage-all", "btn-commit"];
+  const REPO_BUTTONS = ["btn-fetch", "btn-pull", "btn-push", "btn-new-branch", "btn-new-branch-2", "btn-stage-all", "btn-unstage-all", "btn-commit", "btn-review-run"];
 
   const S = {
     token: null, workspaces: [], workspaceId: null, repoId: null, stateSeq: 0, state: null, graph: [], proposals: [], events: [],
     selection: null, openDiff: null, detail: null, diffSeq: 0, graphScroll: 0, inspectorTab: "detail", bottomTab: "events", bottomOpen: false, sidePanel: null, terminals: new Map(), busy: new Set(), filter: "", pollTimer: null, changeCount: 0,
+    reviews: [], prs: null, review: { source: "worktree", mode: "code", pr: null },
   };
 
   // ----- token and api -----------------------------------------------------------------
@@ -64,7 +65,7 @@
     const assistantBusy = ["index", "propose", "test", "apply"].some((k) => S.busy.has(k));
     ["propose", "index", "test"].forEach((k) => { const b = $("#btn-" + k); if (b) b.disabled = assistantBusy; });
     $("#btn-commit").disabled = S.busy.has("commit") || noRepo;
-    renderRail();
+    renderRail(); if (key === "review") renderReviewTab();
   }
   function setRepoControls(enabled, reason) {
     REPO_BUTTONS.forEach((id) => { const b = $("#" + id); if (!b) return; b.disabled = !enabled; b.title = enabled ? "" : reason; });
@@ -183,12 +184,12 @@
     renderGraph();
   }
   async function refreshAssistant() {
-    if (!S.state || !S.state.store.initialized) { S.proposals = []; S.events = []; renderAssistant(); return; }
+    if (!S.state || !S.state.store.initialized) { S.proposals = []; S.events = []; S.reviews = []; renderAssistant(); renderReviewTab(); return; }
     try {
       S.proposals = (await api("GET", rp("/proposals?limit=100"))).proposals;
       S.events = (await api("GET", rp("/events?limit=200"))).events;
     } catch (err) { S.proposals = []; S.events = []; }
-    renderAssistant();
+    renderAssistant(); await refreshReviews();
   }
   async function refreshAll() { await refreshState(); await Promise.all([refreshGraph(), refreshAssistant()]); }
 
@@ -203,7 +204,7 @@
       const ws = S.workspaces.find((w) => w.id === S.workspaceId);
       $("#no-repo-text").textContent = ws && !ws.repos.length ? 'Workspace “' + ws.name + '” has no repositories yet. Terminals, branches, commits and the assistant all belong to a repository.' : "No repository selected. Pick one in the repository switcher at the top.";
       noRepoBox.hidden = false; $("#graph-empty").hidden = true;
-      setRepoControls(false, "Select or add a repository first");
+      setRepoControls(false, "Select or add a repository first"); renderReviewTab();
       return;
     }
     noRepoBox.hidden = true;
@@ -218,6 +219,7 @@
     $("#store-missing").hidden = store.initialized; $("#assistant").hidden = !store.initialized;
     $("#provider-line").textContent = store.initialized ? "Provider: " + store.provider + " · " + (store.indexed_files ? store.indexed_files + " files indexed" : "nothing indexed yet, click Index") + " · tests: " + (store.test_command || "not set") : "";
     if (store.provider_name === "manual" && store.initialized) $("#provider-line").textContent += " · degraded mode: no API key, proposals produce a prompt bundle";
+    renderReviewTab();
     const running = st.running_job; if (running && !S.busy.has(running.kind)) watchJob(running);
   }
   function watchJob(job) { setBusy(job.kind, true); (async () => { let j = job; while (j.status === "queued" || j.status === "running") { await new Promise((r) => setTimeout(r, 700)); try { j = await api("GET", "/api/jobs/" + j.id); } catch (e) { break; } } setBusy(job.kind, false); refreshAll(); })(); }
@@ -347,7 +349,7 @@
     if (od && ["commit", "proposal", "patch"].includes(od.kind) && !diffBelongsToDetail(od, dt)) closeDiffView();
   }
   async function showCommit(sha) {
-    S.selection = { type: "commit", sha }; selectTab("inspector", "detail"); renderGraph();
+    S.selection = { type: "commit", sha }; selectTab("inspector", "detail"); renderGraph(); renderReviewTab();
     const pane = $("#pane-detail"); pane.innerHTML = '<div class="muted"><span class="spinner"></span>Loading commit…</div>';
     try {
       const d = await api("GET", rp("/commits/" + sha));
@@ -523,8 +525,77 @@
     } catch (e) { err.textContent = e.message; }
   }
 
+  // ----- review tab ------------------------------------------------------------------------
+  function reviewSources() { const rs = S.state && S.state.store && S.state.store.review_sources; return rs || { branch_base: null, gh: { installed: false, logged_in: false, user: null, error: null } }; }
+  function ghOk() { const g = reviewSources().gh; return !!(g && g.installed && g.logged_in); }
+  function reviewModeOk(mode) { return mode !== "received" || (S.review.source === "pr" && !!S.review.pr); }
+  function renderReviewTab() {
+    const rs = reviewSources(), gh = rs.gh || {}, st = S.state, R = S.review, hasRepo = !!(st && S.repoId);
+    const commit = S.selection && S.selection.type === "commit" ? S.selection.sha : null;
+    const avail = { worktree: true, commit: !!commit, branch: !!rs.branch_base, pr: ghOk() };
+    if (!avail[R.source]) R.source = "worktree";
+    if (!reviewModeOk(R.mode)) R.mode = "code";
+    $$("#review-source [data-source]").forEach((b) => { const s = b.dataset.source; b.disabled = !hasRepo || !avail[s]; b.setAttribute("aria-checked", String(R.source === s));
+      b.title = !avail[s] ? (s === "commit" ? "Select a commit in the graph first" : s === "branch" ? (rs.branch_base ? "" : "No base branch found") : "gh must be installed and logged in") : ""; });
+    $$("#review-mode [data-mode]").forEach((b) => { const m = b.dataset.mode, ok = m !== "received" || (R.source === "pr" && !!R.pr); b.disabled = !hasRepo || !ok; b.setAttribute("aria-checked", String(R.mode === m)); b.title = ok ? "" : "Needs a pull request"; });
+    let note = "";
+    if (R.source === "commit") { const c = S.graph.find((x) => x.sha === commit); note = commit ? (c ? c.short + " " + c.subject : commit.slice(0, 7)) : "Select a commit in the graph."; }
+    else if (R.source === "branch") note = rs.branch_base && st ? st.branch + " vs " + rs.branch_base : "No base branch (main, master or the upstream default) was found.";
+    else if (R.source === "pr") note = S.prsError || (S.prs && !S.prs.length ? "No open pull requests." : "");
+    else note = "Uncommitted changes in the working tree.";
+    if (R.source !== "pr" && !ghOk()) note += (note ? " " : "") + "Pull requests: " + (gh.installed ? "log in with gh auth login" : "gh is not installed") + ".";
+    $("#review-source-note").textContent = note;
+    const prRow = $("#review-pr-row"), sel = $("#review-pr"); prRow.hidden = R.source !== "pr";
+    if (S.prs) { const html = S.prs.map((p) => '<option value="' + esc(p.number) + '">#' + esc(p.number) + " " + esc(p.title) + " (" + esc(p.author) + ")</option>").join(""); if (sel.dataset.html !== html) { sel.innerHTML = html; sel.dataset.html = html; } if (!S.prs.some((p) => String(p.number) === String(R.pr))) R.pr = S.prs.length ? String(S.prs[0].number) : null; sel.value = R.pr || ""; }
+    else { sel.innerHTML = ""; sel.dataset.html = ""; }
+    sel.disabled = !S.prs || !S.prs.length;
+    $$("#review-mode [data-mode]").forEach((b) => { if (b.dataset.mode === "received") { const ok = R.source === "pr" && !!R.pr; b.disabled = !hasRepo || !ok; b.title = ok ? "" : "Needs a pull request"; } });
+    $("#review-draft-row").hidden = R.mode !== "mine";
+    $("#review-gh").textContent = !st ? "" : !gh.installed ? "gh: not installed" : !gh.logged_in ? "gh: not logged in (run gh auth login)" : "gh: logged in as " + (gh.user || "?") + (S.prsOrigin ? " · origin " + S.prsOrigin : "");
+    $("#review-run-label").textContent = R.mode === "code" ? "Review" : "Evaluate";
+    const bad = (R.source === "commit" && !commit) || (R.source === "pr" && !R.pr);
+    const run = $("#btn-review-run"); run.disabled = !hasRepo || S.busy.has("review") || bad; if (!hasRepo) run.title = "Select or add a repository first"; else run.title = bad ? "Choose what to review first" : "";
+    renderReviewHistory();
+  }
+  function renderReviewHistory() {
+    const ul = $("#review-history"), cur = S.reviewSel;
+    ul.innerHTML = S.reviews.map((r) => '<li><button type="button" class="hist-row" data-review="' + esc(r.id) + '" aria-pressed="' + (cur === r.id) + '"><span class="mono">#' + esc(r.id) + "</span><span>" + esc(r.mode) + '</span><span class="hist-src">' + esc(r.source_label || r.source_kind) + "</span><span>" + esc(r.provider || "") + '</span><span class="muted" title="' + esc(r.created_at) + '">' + esc(relTime(r.created_at)) + '</span><span class="hist-status ' + esc(r.status) + '">' + esc(r.status) + "</span></button></li>").join("");
+    $("#review-empty").hidden = S.reviews.length > 0;
+  }
+  async function refreshReviews() {
+    if (!S.repoId || !S.state || !S.state.store.initialized) { S.reviews = []; renderReviewTab(); return; }
+    try { S.reviews = (await api("GET", rp("/reviews?limit=50"))).reviews; } catch (err) { S.reviews = []; }
+    renderReviewTab();
+  }
+  async function loadPrs() {
+    if (!S.repoId) return;
+    const btn = $("#btn-review-prs"); btn.disabled = true; S.prsError = null;
+    try { const d = await api("GET", rp("/github/prs")); S.prs = d.prs; S.prsOrigin = d.origin || null; }
+    catch (err) { S.prs = []; S.prsOrigin = null; S.prsError = err.data && err.data.error ? err.data.error : err.message; }
+    finally { btn.disabled = false; }
+    renderReviewTab();
+  }
+  function selectReview(id) {
+    S.reviewSel = id; renderReviewHistory();
+    if (typeof openReport === "function") openReport(id);
+  }
+  async function runReview() {
+    const R = S.review, err = $("#review-error"); err.textContent = "";
+    let ref = "";
+    if (R.source === "commit") ref = S.selection && S.selection.type === "commit" ? S.selection.sha : "";
+    else if (R.source === "pr") ref = R.pr ? String(R.pr) : "";
+    if ((R.source === "commit" || R.source === "pr") && !ref) { err.textContent = "Choose what to review first."; return; }
+    const draft = R.mode === "mine" ? $("#review-draft").value : "";
+    if (R.mode === "mine" && !draft.trim()) { err.textContent = "Paste your draft review first."; $("#review-draft").focus(); return; }
+    const res = await runJob("review", { mode: R.mode, source: { kind: R.source, ref }, draft }, "Reviewing");
+    await refreshReviews();
+    if (!res) return;
+    if (res.manual) { toast("warn", res.message || "Manual mode: no review was produced.", true); return; }
+    if (res.review) selectReview(res.review.id);
+  }
+
   // ----- tabs ------------------------------------------------------------------------------
-  const INSPECTOR_TABS = ["detail", "changes", "proposals", "credentials"];
+  const INSPECTOR_TABS = ["detail", "changes", "proposals", "credentials", "review"];
   function selectTab(region, name) {
     if (region === "inspector") {
       S.inspectorTab = name;
@@ -548,10 +619,11 @@
     const n = S.changeCount || 0, busy = S.busy.has("propose") || S.busy.has("apply");
     const set = (id, text) => { const b = $("#" + id); b.textContent = text; b.hidden = !text; };
     set("badge-changes", n > 99 ? "99+" : n ? String(n) : ""); set("count-changes", n ? String(n) : "");
-    set("badge-proposals", busy ? "…" : ""); set("count-proposals", S.proposals.length ? String(S.proposals.length) : "");
+    set("badge-proposals", busy ? "…" : ""); set("badge-review", S.busy.has("review") ? "…" : ""); set("count-proposals", S.proposals.length ? String(S.proposals.length) : "");
     // the badge is capped and decorative; the button's name carries the real count
     $('#rail [data-rail="changes"]').setAttribute("aria-label", n ? "Changes, " + n + (n === 1 ? " file" : " files") : "Changes");
     $('#rail [data-rail="proposals"]').setAttribute("aria-label", busy ? "Proposals, running" : "Proposals");
+    $('#rail [data-rail="review"]').setAttribute("aria-label", S.busy.has("review") ? "Review, running" : "Review");
   }
   function toggleSidePanel(name) {
     const open = S.sidePanel !== name; S.sidePanel = open ? name : null;
@@ -564,7 +636,7 @@
     const b = ev.target.closest("[data-rail]"); if (!b) return; const k = b.dataset.rail;
     if (k === "repos") { if ($("#repo-menu").open) closeRepoMenu(); else openRepoMenu(b); }
     else if (k === "credentials") showCredentials();
-    else if (k === "changes" || k === "proposals") selectTab("inspector", k);
+    else if (k === "changes" || k === "proposals" || k === "review") selectTab("inspector", k);
     else if (k === "terminal") openTerminal();
     else if (k === "events") openBottom("events");
     else if (k === "model") openModelDialog();
@@ -653,6 +725,12 @@
       $("#task").value = ""; await refreshAssistant(); showProposal(r.proposal.id);
       toast(r.proposal.status === "invalid" ? "bad" : "ok", "Proposal #" + r.proposal.id + " " + r.proposal.status + (r.proposal.notes ? ": " + r.proposal.notes : ""), r.proposal.status === "invalid");
     });
+    $("#review-source").addEventListener("click", (ev) => { const b = ev.target.closest("[data-source]"); if (!b || b.disabled) return; S.review.source = b.dataset.source; if (!reviewModeOk(S.review.mode)) S.review.mode = "code"; renderReviewTab(); if (b.dataset.source === "pr" && S.prs === null) loadPrs(); });
+    $("#review-mode").addEventListener("click", (ev) => { const b = ev.target.closest("[data-mode]"); if (!b || b.disabled) return; S.review.mode = b.dataset.mode; renderReviewTab(); });
+    $("#review-pr").addEventListener("change", (ev) => { S.review.pr = ev.target.value || null; renderReviewTab(); });
+    $("#btn-review-prs").addEventListener("click", () => loadPrs());
+    $("#btn-review-run").addEventListener("click", runReview);
+    $("#review-history").addEventListener("click", (ev) => { const b = ev.target.closest("[data-review]"); if (b) selectReview(Number(b.dataset.review)); });
     $("#proposals-table").addEventListener("click", (ev) => { const tr = ev.target.closest("[data-prop]"); if (tr) showProposal(Number(tr.dataset.prop)); });
     $("#proposals-table").addEventListener("keydown", (ev) => { const tr = ev.target.closest("[data-prop]"); if (tr && ev.key === "Enter") showProposal(Number(tr.dataset.prop)); });
     $("#pane-detail").addEventListener("click", async (ev) => {
@@ -681,7 +759,8 @@
       // Escape leaves the diff view or the branches panel even from a text field (the filter, the commit message)
       if (ev.key === "Escape") { if (document.querySelector("dialog[open]")) return; if (S.openDiff) { ev.preventDefault(); closeDiffView(); } else if (S.sidePanel) { ev.preventDefault(); toggleSidePanel(S.sidePanel); } return; }
       const tag = (ev.target.tagName || "").toLowerCase(); if (["input", "textarea", "select"].includes(tag)) return;
-      const num = ["1", "2", "3", "4"].indexOf(ev.key); if (num >= 0) { ev.preventDefault(); if (ev.key === "4") showCredentials(); else selectTab("inspector", INSPECTOR_TABS[num]); return; }
+      const num = ["1", "2", "3", "4", "5"].indexOf(ev.key); if (num >= 0) { ev.preventDefault(); if (ev.key === "4") showCredentials(); else selectTab("inspector", INSPECTOR_TABS[num]); return; }
+      if (ev.key === "r") { ev.preventDefault(); selectTab("inspector", "review"); renderReviewTab(); const d = $("#review-draft"); (S.review.mode === "mine" ? d : $("#btn-review-run")).focus(); return; }
       if (ev.key === "p") { ev.preventDefault(); selectTab("inspector", "proposals"); $("#task").focus(); } if (ev.key === "c") { ev.preventDefault(); selectTab("inspector", "changes"); $("#commit-message").focus(); } if (ev.key === "t") { ev.preventDefault(); openTerminal(); } if (ev.key === "/") { ev.preventDefault(); $("#commit-filter").focus(); } if (ev.key === "?") { ev.preventDefault(); $("#help").showModal(); }
     });
     document.addEventListener("visibilitychange", () => { if (document.hidden) clearInterval(S.pollTimer); else startPolling(); });

@@ -144,3 +144,16 @@ def test_accessibility_pass_fixes():
     assert '"focusout"' in js and '$("#btn-diff-back").focus(' in js
     assert "outline: 0" not in css.split(".filter:focus-within", 1)[1].split("}", 1)[0]  # the wrapper carries the ring
     assert 'class="row-c" role="option" tabindex="0"' not in js  # the commit list is one Tab stop (roving tabindex)
+
+
+def test_review_tab_structure():
+    html = (STATIC / "index.html").read_text(encoding="utf-8"); js = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert 'data-tab="review"' in html and 'id="pane-review"' in html and 'data-rail="review"' in html and 'id="badge-review"' in html
+    pane = html.split('id="pane-review"', 1)[1].split('id="pane-credentials"', 1)[0]
+    for i in ("review-source", "review-source-note", "review-mode", "review-draft", "review-gh", "btn-review-run", "review-error", "review-history", "review-empty"):
+        assert f'id="{i}"' in pane, i
+    for s in ("worktree", "commit", "branch", "pr"): assert f'data-source="{s}"' in pane
+    for m in ("code", "received", "mine"): assert f'data-mode="{m}"' in pane
+    assert '"review"' in js.split("const INSPECTOR_TABS", 1)[1].split("\n", 1)[0]
+    assert "function runReview" in js and "function refreshReviews" in js and "function loadPrs" in js
+    assert "<dt>5</dt>" in html or "<dt>1-5</dt>" in html or "<dt>1–5</dt>" in html
