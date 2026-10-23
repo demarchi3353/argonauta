@@ -94,3 +94,35 @@ def test_manager_uses_the_conpty_backend(fake_winpty, tmp_path, monkeypatch):
     assert s.to_dict()["alive"] is True and m.list_for(tmp_path) == [s]
     m.shutdown()
     assert not s.alive()
+
+
+def test_winpty_errors_end_the_session_but_kill_still_signals(fake_winpty, tmp_path, monkeypatch, caplog):
+    from argonauta.web.terminal_windows import WindowsTerminalSession
+    kills = []
+    monkeypatch.setattr("os.kill", lambda pid, sig: (kills.append(pid), setattr(FakePTY.instances[-1], "alive_flag", False)))
+
+    def boom(*a, **k):
+        raise WinptyError("pipe broken")
+
+    s = WindowsTerminalSession.spawn(tmp_path, shell=str(fake_winpty))
+    monkeypatch.setattr(FakePTY.instances[-1], "read", boom)
+    assert s.read(0.01) == b"" and not s.alive() and s.read(0.01) == b""
+    assert "read failed" in caplog.text  # shell was alive: logged, not swallowed
+    s.kill()
+    assert kills == [4242]  # a live shell is signalled even after the session was marked exited
+
+    s2 = WindowsTerminalSession.spawn(tmp_path, shell=str(fake_winpty))
+    monkeypatch.setattr(FakePTY.instances[-1], "write", boom)
+    s2.write(b"x")
+    assert s2.read(0.01) == b"" and "write failed" in caplog.text
+    s2.kill()
+    assert kills == [4242, 4242]
+
+
+def test_lone_surrogate_does_not_end_the_session(fake_winpty, tmp_path):
+    from argonauta.web.terminal_windows import WindowsTerminalSession
+    s = WindowsTerminalSession.spawn(tmp_path, shell=str(fake_winpty))
+    FakePTY.instances[-1].out = "a\ud83d"
+    data = s.read(0.01)
+    assert data.startswith(b"a") and s.alive()
+    s.kill()

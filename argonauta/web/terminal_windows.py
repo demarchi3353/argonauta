@@ -61,12 +61,28 @@ class WindowsTerminalSession:
         try:
             started = pty.spawn(appname=shell, cmdline=shell_cmdline(shell), cwd=str(repo_root), env=env)
         except WinptyError as exc:
+            log.warning("terminal spawn of %s failed", shell, exc_info=True)
             raise TerminalError(f"could not start {shell}: {exc}") from exc
         if not started:
             raise TerminalError(f"could not start {shell}: spawn returned False")
         session = cls(id="t_" + secrets.token_hex(6), repo_root=repo_root, pty=pty, cols=cols, rows=rows)
         log.info("terminal %s spawned pid=%s", session.id, session.pid)
         return session
+
+    @staticmethod
+    def _isalive(pty) -> bool:
+        try:
+            return bool(pty.isalive())
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _fail(self, op: str, pty) -> None:
+        """Mark the session over; a failure while the shell lives is logged loudly."""
+        if self._isalive(pty):
+            log.warning("terminal %s %s failed", self.id, op, exc_info=True)
+        else:
+            log.debug("terminal %s %s ended: shell exited", self.id, op, exc_info=True)
+        self._exited = True
 
     def resize(self, cols: int, rows: int) -> None:
         self.cols = max(10, min(int(cols), 500))
@@ -77,7 +93,7 @@ class WindowsTerminalSession:
         try:
             pty.set_size(self.cols, self.rows)
         except Exception:  # noqa: BLE001 - a dying console must not break the caller
-            pass
+            log.debug("terminal %s resize failed", self.id, exc_info=True)
 
     def write(self, data: bytes) -> None:
         pty = self._pty
@@ -86,7 +102,7 @@ class WindowsTerminalSession:
         try:
             pty.write(data.decode("utf-8", "replace"))
         except Exception:  # noqa: BLE001
-            self._exited = True
+            self._fail("write", pty)
 
     def read(self, timeout: float = 0.1) -> bytes | None:
         pty = self._pty
@@ -94,14 +110,14 @@ class WindowsTerminalSession:
             return b""
         try:
             text = pty.read(blocking=False)
-            if text:
-                return text.encode("utf-8")
-            if pty.iseof() or not pty.isalive():
+            if not text and (pty.iseof() or not pty.isalive()):
                 self._exited = True
                 return b""
-        except Exception:  # noqa: BLE001
-            self._exited = True
+        except Exception:  # noqa: BLE001 - pywinpty may report EOF as an error
+            self._fail("read", pty)
             return b""
+        if text:
+            return text.encode("utf-8", "replace")  # a split surrogate pair must not end the session
         time.sleep(min(timeout, 0.02))
         return None
 
@@ -109,11 +125,8 @@ class WindowsTerminalSession:
         pty = self._pty
         if self._exited or pty is None:
             return False
-        try:
-            if pty.isalive():
-                return True
-        except Exception:  # noqa: BLE001
-            pass
+        if self._isalive(pty):
+            return True
         self._exited = True
         return False
 
@@ -124,7 +137,7 @@ class WindowsTerminalSession:
                 return
             self._closed = True
             pty = self._pty
-            if self.alive():
+            if pty is not None and self._isalive(pty):  # not self.alive(): _exited may be spurious
                 try:
                     os.kill(self.pid, signal.SIGTERM)
                 except OSError:
@@ -133,11 +146,8 @@ class WindowsTerminalSession:
             self._pty = None  # dropping the PTY closes its handles
             gone = pty is None
             deadline = time.monotonic() + 1.0
-            while pty is not None and not gone:
-                try:
-                    gone = not pty.isalive()
-                except Exception:  # noqa: BLE001
-                    gone = True
+            while not gone:
+                gone = not self._isalive(pty)
                 if not gone:
                     if time.monotonic() >= deadline:
                         break
