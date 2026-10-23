@@ -1,6 +1,7 @@
 """API tests against a real server thread, a temp repo and a bare remote."""
 import http.client
 import json
+import os
 import shutil
 import threading
 from pathlib import Path
@@ -343,6 +344,7 @@ def test_credentials_endpoint(api):
     assert data["ssh"]["kind"] in ("none", "ssh", "https", "local")
 
 
+@pytest.mark.skipif(os.name != "posix", reason="pty backend")
 def test_terminal_create_list_delete(api):
     r = f"/api/repos/{api.repo.id}"
     assert api.post(f"{r}/terminals", {"cols": "x"})[0] == 400
@@ -385,9 +387,10 @@ def test_worktree_api_create_list_remove(api):
     # the worktree is a repository of its own: state, terminal, graph all work there
     st = api.get(f"/api/repos/{wt_id}/state")[1]
     assert st["branch"] == "feature-a" and st["repo"]["worktree"] is True
-    status, t = api.post(f"/api/repos/{wt_id}/terminals", {"cols": 80, "rows": 24})
-    assert status == 201 and t["terminal"]["repo_root"] == data["repo"]["path"]
-    api.request("DELETE", f"/api/terminals/{t['terminal']['id']}")
+    if os.name == "posix":
+        status, t = api.post(f"/api/repos/{wt_id}/terminals", {"cols": 80, "rows": 24})
+        assert status == 201 and t["terminal"]["repo_root"] == data["repo"]["path"]
+        api.request("DELETE", f"/api/terminals/{t['terminal']['id']}")
     # a dirty worktree refuses removal unless forced
     from pathlib import Path
     Path(data["repo"]["path"], "dirty.txt").write_text("x\n")

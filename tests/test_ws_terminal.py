@@ -10,6 +10,8 @@ import pytest
 from argonauta.web import websocket as ws
 from tests.test_api import api  # noqa: F401 - fixture
 
+pytestmark = pytest.mark.skipif(os.name != "posix", reason="pty backend")
+
 
 class WsClient:
     def __init__(self, port, path, origin=None, host=None):

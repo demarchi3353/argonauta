@@ -1,202 +1,106 @@
-"""Pty-backed shell sessions for the embedded terminal.
+"""Embedded terminal: backend selection and session management.
 
-Each session is a real login shell running inside the repository. It inherits
-the user's environment (so git, ssh and gpg behave exactly as in a terminal)
-and dies when the WebSocket closes, when the manager removes it, or when the
-server shuts down.
+The platform-specific sessions live in terminal_posix (pty) and
+terminal_windows (ConPTY via pywinpty); this module stays importable anywhere.
 """
 
 from __future__ import annotations
 
-import fcntl
 import os
-import pty
-import secrets
-import select
-import signal
-import struct
-import termios
+import shutil
 import threading
-import time
+from dataclasses import dataclass
 from pathlib import Path
 
-from argonauta.logging_setup import get_logger
-from argonauta.models import utcnow
-
-log = get_logger()
-READ_CHUNK = 65536
+MISSING_PYWINPTY = 'Terminals on Windows need the pywinpty package: pip install "argonauta[windows]"'
 
 
 class TerminalError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class TerminalSupport:
+    available: bool
+    backend: str
+    reason: str | None
+
+
+_support_cache: dict[str, TerminalSupport] = {}
+
+
+def reset_support_cache() -> None:
+    _support_cache.clear()
+
+
+def terminal_support(backend: str | None = None) -> TerminalSupport:
+    backend = backend or ("conpty" if os.name == "nt" else "pty")
+    cached = _support_cache.get(backend)
+    if cached is not None:
+        return cached
+    if backend == "conpty":
+        try:
+            import winpty  # noqa: F401
+            result = TerminalSupport(True, "conpty", None)
+        except ImportError:
+            result = TerminalSupport(False, "conpty", MISSING_PYWINPTY)
+    else:
+        result = TerminalSupport(True, "pty", None)
+    _support_cache[backend] = result
+    return result
+
+
+def _is_executable(path: str) -> bool:
+    return bool(path) and os.path.isfile(path) and os.access(path, os.X_OK)
+
+
 def default_shell() -> str:
-    candidate = os.environ.get("SHELL", "").strip()
-    for path in (candidate, "/bin/zsh", "/bin/bash", "/bin/sh"):
-        if path and os.path.isfile(path) and os.access(path, os.X_OK):
-            return path
+    override = os.environ.get("ARGONAUTA_SHELL", "").strip()
+    if override:
+        if not _is_executable(override):
+            raise TerminalError(f"ARGONAUTA_SHELL is not an executable: {override}")
+        return override
+    if os.name != "nt":
+        for path in (os.environ.get("SHELL", "").strip(), "/bin/zsh", "/bin/bash", "/bin/sh"):
+            if _is_executable(path):
+                return path
+    else:
+        for path in (shutil.which("pwsh.exe"), shutil.which("powershell.exe"), os.environ.get("COMSPEC"), shutil.which("cmd.exe")):
+            if path and _is_executable(path):
+                return path
     raise TerminalError("no usable shell found")
 
 
-class TerminalSession:
-    def __init__(self, id: str, repo_root: Path, pid: int, fd: int, cols: int, rows: int):
-        self.id = id
-        self.repo_root = repo_root
-        self.pid = pid
-        self.fd = fd
-        self.cols = cols
-        self.rows = rows
-        self.started_at = utcnow()
-        self._exited = False
-        self._closed = False
-        self._lock = threading.Lock()
+def spawn_session(backend: str, repo_root: Path, cols: int, rows: int, shell: str | None = None):
+    if backend == "conpty":
+        from argonauta.web import terminal_windows
 
-    @classmethod
-    def spawn(cls, repo_root: Path, cols: int = 80, rows: int = 24, shell: str | None = None) -> TerminalSession:
-        shell = shell or default_shell()
-        if not (os.path.isfile(shell) and os.access(shell, os.X_OK)):
-            raise TerminalError(f"shell not found: {shell}")
-        cols = max(10, min(int(cols), 500))
-        rows = max(3, min(int(rows), 200))
-        pid, fd = pty.fork()
-        if pid == 0:  # child: only exec, never return
-            try:
-                os.chdir(repo_root)
-                env = dict(os.environ)
-                env["TERM"] = "xterm-256color"
-                env["COLORTERM"] = "truecolor"
-                env.pop("PROMPT_COMMAND", None)
-                os.execve(shell, [f"-{os.path.basename(shell)}"], env)
-            except BaseException:  # noqa: BLE001
-                os._exit(127)
-        session = cls(id="t_" + secrets.token_hex(6), repo_root=repo_root, pid=pid, fd=fd, cols=cols, rows=rows)
-        session.resize(cols, rows)
-        log.info("terminal %s spawned pid=%s", session.id, pid)
-        return session
+        return terminal_windows.WindowsTerminalSession.spawn(repo_root, cols, rows, shell)
+    from argonauta.web import terminal_posix
 
-    def resize(self, cols: int, rows: int) -> None:
-        self.cols = max(10, min(int(cols), 500))
-        self.rows = max(3, min(int(rows), 200))
-        try:
-            fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", self.rows, self.cols, 0, 0))
-        except OSError:
-            pass
-
-    def write(self, data: bytes) -> None:
-        if self._exited:
-            return
-        try:
-            os.write(self.fd, data)
-        except OSError:
-            self._exited = True
-
-    def read(self, timeout: float = 0.1) -> bytes | None:
-        if self._exited:
-            return b""
-        try:
-            ready, _, _ = select.select([self.fd], [], [], timeout)
-        except (OSError, ValueError):
-            self._exited = True
-            return b""
-        if not ready:
-            return None
-        try:
-            data = os.read(self.fd, READ_CHUNK)
-        except OSError:  # EIO once the child is gone
-            self._exited = True
-            return b""
-        if not data:
-            self._exited = True
-            return b""
-        return data
-
-    def alive(self) -> bool:
-        if self._exited:
-            return False
-        try:
-            pid, _ = os.waitpid(self.pid, os.WNOHANG)
-        except ChildProcessError:
-            self._exited = True
-            return False
-        if pid != 0:
-            self._exited = True
-            return False
-        return True
-
-    def _signal(self, sig: int) -> bool:
-        """Signal the shell's whole process group; False once it is gone."""
-        try:
-            os.killpg(self.pid, sig)
-            return True
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            try:
-                os.kill(self.pid, sig)
-                return True
-            except ProcessLookupError:
-                return False
-
-    def _reap(self, timeout: float) -> bool:
-        deadline = time.monotonic() + timeout
-        while True:
-            try:
-                pid, _ = os.waitpid(self.pid, os.WNOHANG)
-            except ChildProcessError:
-                return True
-            if pid:
-                return True
-            if time.monotonic() >= deadline:
-                return False
-            time.sleep(0.02)
-
-    def kill(self) -> None:
-        """Hang up the terminal and end the shell without ever blocking.
-
-        Closing the pty master is what normally ends the shell. macOS can keep
-        a signalled session leader in the exiting state for a long time (it
-        was observed with zsh killed during start-up), so the wait is bounded
-        and the session is marked dead even if the kernel has not reaped it.
-        """
-        with self._lock:
-            if self._closed:
-                return
-            self._closed = True
-            self._exited = True
-            try:
-                os.close(self.fd)
-            except OSError:
-                pass
-            reaped = self._reap(0.3)
-            for sig, wait in ((signal.SIGHUP, 0.5), (signal.SIGTERM, 0.5), (signal.SIGKILL, 1.0)):
-                if reaped:
-                    break
-                if not self._signal(sig):
-                    reaped = self._reap(0.1)
-                    break
-                reaped = self._reap(wait)
-        if reaped:
-            log.info("terminal %s closed", self.id)
-        else:
-            log.warning("terminal %s shell pid=%s did not exit in time; left for the OS", self.id, self.pid)
-
-    def to_dict(self) -> dict:
-        return {"id": self.id, "repo_root": str(self.repo_root), "started_at": self.started_at, "alive": self.alive(), "cols": self.cols, "rows": self.rows}
+    return terminal_posix.TerminalSession.spawn(repo_root, cols, rows, shell)
 
 
 class TerminalManager:
-    def __init__(self, max_sessions: int = 20):
-        self._sessions: dict[str, TerminalSession] = {}
+    def __init__(self, max_sessions: int = 20, backend: str | None = None):
+        self._sessions: dict = {}
         self._lock = threading.Lock()
         self._max = max_sessions
+        self.backend = backend
 
-    def create(self, repo_root: Path, cols: int, rows: int) -> TerminalSession:
+    @property
+    def support(self) -> TerminalSupport:
+        return terminal_support(self.backend)
+
+    def create(self, repo_root: Path, cols: int, rows: int):
+        sup = terminal_support(self.backend)
+        if not sup.available:
+            raise TerminalError(sup.reason)
         with self._lock:
             self._reap()
             if len(self._sessions) >= self._max:
                 raise TerminalError("too many open terminals; close one first")
-            session = TerminalSession.spawn(repo_root, cols, rows)
+            session = spawn_session(sup.backend, repo_root, cols, rows)
             self._sessions[session.id] = session
             return session
 
@@ -206,11 +110,11 @@ class TerminalManager:
                 session.kill()
                 self._sessions.pop(sid, None)
 
-    def get(self, session_id: str) -> TerminalSession | None:
+    def get(self, session_id: str):
         with self._lock:
             return self._sessions.get(session_id)
 
-    def list_for(self, repo_root: Path) -> list[TerminalSession]:
+    def list_for(self, repo_root: Path) -> list:
         with self._lock:
             return [s for s in self._sessions.values() if s.repo_root == repo_root and s.alive()]
 
@@ -226,3 +130,12 @@ class TerminalManager:
             self._sessions.clear()
         for session in sessions:
             session.kill()
+
+
+def __getattr__(name: str):
+    # POSIX only: re-export TerminalSession lazily, since terminal_posix imports this module.
+    if name == "TerminalSession" and os.name != "nt":
+        from argonauta.web.terminal_posix import TerminalSession
+
+        return TerminalSession
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
