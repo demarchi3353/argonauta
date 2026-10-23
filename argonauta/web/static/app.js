@@ -11,7 +11,7 @@
 
   const S = {
     token: null, workspaces: [], workspaceId: null, repoId: null, stateSeq: 0, state: null, graph: [], proposals: [], events: [],
-    selection: null, openDiff: null, detail: null, diffSeq: 0, graphScroll: 0, inspectorTab: "detail", bottomTab: "events", bottomOpen: false, sidePanel: null, terminals: new Map(), busy: new Set(), filter: "", pollTimer: null,
+    selection: null, openDiff: null, detail: null, diffSeq: 0, graphScroll: 0, inspectorTab: "detail", bottomTab: "events", bottomOpen: false, sidePanel: null, terminals: new Map(), busy: new Set(), filter: "", pollTimer: null, changeCount: 0,
   };
 
   // ----- token and api -----------------------------------------------------------------
@@ -117,14 +117,14 @@
     if (current) S.workspaceId = current.id;
     const cur = current && current.repos.find((r) => r.id === S.repoId);
     $("#repo-switch-label").innerHTML = current ? '<span class="muted">' + esc(current.name) + "</span> / " + (cur ? esc(cur.name) : '<span class="muted">no repository</span>') : "No repository";
-    tree.innerHTML = S.workspaces.map((w) => '<li class="ws" role="presentation">' + ic("i-folder") + esc(w.name) + ' <button class="btn mini ghost" data-del-ws="' + esc(w.id) + '" aria-label="Remove workspace ' + esc(w.name) + '" title="Remove workspace">' + ic("i-x") + '</button></li>' +
-      (w.repos.length ? "" : '<li class="repo muted" role="none"><em>empty: use “+ Repo” to add a repository</em></li>') +
-      w.repos.filter((r) => !r.parent_id).map((r) => '<li class="repo' + (r.id === S.repoId ? " active" : "") + (r.exists ? "" : " missing") + '" role="menuitem" tabindex="0" data-repo="' + esc(r.id) + '" title="' + esc(r.path) + '">' + ic("i-repo") + esc(r.name) + (r.exists ? "" : " (missing)") +
+    tree.innerHTML = S.workspaces.map((w) => '<li class="ws" role="treeitem" aria-level="1" aria-expanded="true">' + ic("i-folder") + esc(w.name) + ' <button class="btn mini ghost" data-del-ws="' + esc(w.id) + '" aria-label="Remove workspace ' + esc(w.name) + '" title="Remove workspace">' + ic("i-x") + '</button></li>' +
+      (w.repos.length ? "" : '<li class="repo muted" role="treeitem" aria-level="2"><em>empty: use “+ Repo” to add a repository</em></li>') +
+      w.repos.filter((r) => !r.parent_id).map((r) => '<li class="repo' + (r.id === S.repoId ? " active" : "") + (r.exists ? "" : " missing") + '" role="treeitem" aria-level="2" aria-selected="' + (r.id === S.repoId) + '" tabindex="0" data-repo="' + esc(r.id) + '" title="' + esc(r.path) + '">' + ic("i-repo") + esc(r.name) + (r.exists ? "" : " (missing)") +
         ' <button class="btn mini ghost" data-add-wt="' + esc(r.id) + '" aria-label="New worktree of ' + esc(r.name) + '" title="New worktree: a separate checkout with its own terminal">' + ic("i-plus") + ic("i-worktree") + '</button>' +
         '<button class="btn mini ghost" data-del-repo="' + esc(r.id) + '" data-ws="' + esc(w.id) + '" aria-label="Remove repository ' + esc(r.name) + '" title="Remove from workspace">' + ic("i-x") + '</button></li>' +
-        w.repos.filter((c) => c.parent_id === r.id).map((c) => '<li class="repo wt' + (c.id === S.repoId ? " active" : "") + (c.exists ? "" : " missing") + '" role="menuitem" tabindex="0" data-repo="' + esc(c.id) + '" title="Worktree at ' + esc(c.path) + '">' + ic("i-worktree") + esc(c.name) + (c.exists ? "" : " (missing)") +
+        w.repos.filter((c) => c.parent_id === r.id).map((c) => '<li class="repo wt' + (c.id === S.repoId ? " active" : "") + (c.exists ? "" : " missing") + '" role="treeitem" aria-level="3" aria-selected="' + (c.id === S.repoId) + '" tabindex="0" data-repo="' + esc(c.id) + '" title="Worktree at ' + esc(c.path) + '">' + ic("i-worktree") + esc(c.name) + (c.exists ? "" : " (missing)") +
           ' <button class="btn mini ghost" data-del-wt="' + esc(c.name) + '" data-main="' + esc(r.id) + '" aria-label="Remove worktree ' + esc(c.name) + '" title="Remove worktree (the branch is kept)">' + ic("i-trash") + '</button></li>').join("")).join("")).join("");
-    if (!S.workspaces.length) tree.innerHTML = '<li class="empty">No workspaces. Use “+ Workspace”, then “+ Repo”.</li>';
+    if (!S.workspaces.length) tree.innerHTML = '<li class="empty" role="treeitem" aria-level="1">No workspaces. Use “+ Workspace”, then “+ Repo”.</li>';
   }
   async function selectRepo(id) {
     S.repoId = id; S.selection = null; S.detail = null; S.graph = []; S.proposals = []; S.stateSeq++; closeDiffView();
@@ -137,7 +137,16 @@
   // the switcher popover: a non-modal dialog under its trigger; Escape, an outside click or a pick closes it
   let menuAnchor = null;
   function onMenuKey(ev) { if (ev.key === "Escape" && !document.querySelector("dialog[open]:not(#repo-menu)")) { ev.preventDefault(); closeRepoMenu(); } }
-  function onMenuClick(ev) { if (!ev.target.closest("#repo-menu, #repo-switch, dialog")) closeRepoMenu(); }
+  function onMenuClick(ev) { if (!ev.target.closest('#repo-menu, [aria-controls="repo-menu"], dialog')) closeRepoMenu(); } // both openers toggle it themselves
+  // Tab out of the popover closes it; a confirm dialog opened from inside it or a re-render (relatedTarget null) does not
+  function onMenuFocusOut(ev) { const to = ev.relatedTarget; if (to && to !== menuAnchor && !to.closest("#repo-menu, dialog[open]")) closeRepoMenu(false); }
+  function onMenuArrow(ev) {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(ev.key)) return;
+    const rows = $$("#workspace-list [data-repo]"); if (!rows.length) return;
+    const cur = ev.target.closest("[data-repo]"), i = rows.indexOf(cur);
+    const next = ev.key === "Home" ? 0 : ev.key === "End" ? rows.length - 1 : i < 0 ? 0 : Math.min(rows.length - 1, Math.max(0, i + (ev.key === "ArrowDown" ? 1 : -1)));
+    ev.preventDefault(); rows[next].focus();
+  }
   function openRepoMenu(anchorEl) {
     const m = $("#repo-menu"), r = anchorEl.getBoundingClientRect();
     menuAnchor = anchorEl; renderWorkspaces();
@@ -147,10 +156,10 @@
     document.addEventListener("keydown", onMenuKey); document.addEventListener("click", onMenuClick);
     const first = m.querySelector(".repo.active") || m.querySelector("[data-repo]"); if (first) first.focus();
   }
-  function closeRepoMenu() {
+  function closeRepoMenu(returnFocus = true) {
     const m = $("#repo-menu"); if (m.open) m.close();
     document.removeEventListener("keydown", onMenuKey); document.removeEventListener("click", onMenuClick);
-    if (menuAnchor) { menuAnchor.setAttribute("aria-expanded", "false"); menuAnchor.focus(); menuAnchor = null; }
+    if (menuAnchor) { menuAnchor.setAttribute("aria-expanded", "false"); if (returnFocus) menuAnchor.focus(); menuAnchor = null; }
   }
 
   // ----- state and graph -------------------------------------------------------------------
@@ -243,11 +252,15 @@
       paths.push('<circle cx="' + x(c.lane) + '" cy="' + y(i) + '" r="4.5" fill="' + color(c.lane) + '"/>');
     });
     const svg = '<svg width="' + (x(maxLane) + 14) + '" height="' + (rows.length * rowH) + '" fill="none" stroke-width="2" aria-hidden="true">' + paths.join("") + "</svg>";
+    // roving tabindex: one Tab stop for the whole list (the selected commit, else the first); arrows move between rows
+    const had = box.contains(document.activeElement) ? document.activeElement.dataset.sha : null; // a re-render keeps the focused row
+    const sel = had && rows.some((c) => c.sha === had) ? had : S.selection && S.selection.type === "commit" && rows.some((c) => c.sha === S.selection.sha) ? S.selection.sha : rows.length ? rows[0].sha : null;
     box.innerHTML = svg + rows.map((c) => {
       const refs = c.refs.map((r) => '<span class="ref' + (r.startsWith("HEAD") ? " head" : "") + '">' + esc(r.replace("HEAD -> ", "")) + "</span>").join("");
       const word = sigWord(c.signature);
-      return '<div class="row-c" role="option" tabindex="0" aria-selected="' + (S.selection && S.selection.type === "commit" && S.selection.sha === c.sha) + '" data-sha="' + esc(c.sha) + '"><span></span><span class="subject">' + refs + esc(c.subject) + '</span><span class="sig ' + word + '" title="signature: ' + word + '">' + (SIG[word] || "·") + '</span><span class="sha">' + esc(c.short) + "</span></div>";
+      return '<div class="row-c" role="option" tabindex="' + (c.sha === sel ? 0 : -1) + '" aria-selected="' + (S.selection && S.selection.type === "commit" && S.selection.sha === c.sha) + '" data-sha="' + esc(c.sha) + '"><span></span><span class="subject">' + refs + esc(c.subject) + '</span><span class="sig ' + word + '" title="signature: ' + word + '">' + (SIG[word] || "·") + '</span><span class="sha">' + esc(c.short) + "</span></div>";
     }).join("");
+    if (had && sel === had) { const r = box.querySelector('[tabindex="0"]'); if (r) r.focus({ preventScroll: true }); }
   }
   function sigWord(code) { return { G: "good", B: "bad", U: "good_untrusted", X: "expired_signature", Y: "expired_key", R: "revoked", E: "unknown_key", N: "unsigned" }[code] || "unsigned"; }
 
@@ -262,7 +275,8 @@
     }).join("") + "</div>";
   }
   function openDiffView(spec) {
-    if (!S.openDiff) S.graphScroll = $("#graph-panel").scrollTop;
+    const wasOpen = !!S.openDiff;
+    if (!wasOpen) S.graphScroll = $("#graph-panel").scrollTop;
     S.openDiff = spec;
     const short = spec.sha ? spec.sha.slice(0, 7) : "";
     const sub = { worktree: "working tree", index: "staged", commit: short, proposal: "Proposal #" + spec.pid, patch: spec.sha ? short : "Proposal #" + spec.pid }[spec.kind];
@@ -273,6 +287,8 @@
       : spec.kind === "index" ? '<button class="btn" type="button" data-unstage="' + esc(spec.path) + '">' + ic("i-undo") + "Unstage</button>" : "";
     const body = $("#diff-body"); body.innerHTML = diffHtml(spec.text); body.scrollTop = 0; body.scrollLeft = 0;
     $("#graph-area").hidden = true; $("#diff-view").hidden = false;
+    // move focus into the view on open, and after a re-render dropped it (the Stage button is replaced)
+    const ae = document.activeElement; if (!wasOpen || !ae || ae === document.body) $("#btn-diff-back").focus({ preventScroll: true });
     markCfile();
   }
   function closeDiffView() {
@@ -559,7 +575,8 @@
       if (delWs) { if (await dialog("Remove workspace", "Remove this workspace and its repository list? Files on disk are not touched.", { ok: "Remove", danger: true })) { await api("DELETE", "/api/workspaces/" + delWs.dataset.delWs).catch((e) => toast("bad", e.message)); await loadWorkspaces(); await refreshAll(); } return; }
       if (repo && !repo.classList.contains("missing")) selectRepo(repo.dataset.repo);
     });
-    $("#workspace-list").addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.target.dataset.repo) selectRepo(ev.target.dataset.repo); });
+    $("#workspace-list").addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.target.dataset.repo && !ev.target.classList.contains("missing")) { ev.preventDefault(); selectRepo(ev.target.dataset.repo); } else onMenuArrow(ev); }); // preventDefault: the Enter must not click the opener that gets focus back
+    $("#repo-menu").addEventListener("focusout", onMenuFocusOut);
     $("#btn-add-workspace").addEventListener("click", async () => { const name = await dialog("New workspace", "", { input: "Name", ok: "Create" }); if (name) { try { await api("POST", "/api/workspaces", { name }); await loadWorkspaces(); toast("ok", "Workspace created"); } catch (e) { toast("bad", e.message); } } });
     $("#btn-add-repo-2").addEventListener("click", () => $("#btn-add-repo").click());
     $("#btn-add-repo").addEventListener("click", async () => {
@@ -608,6 +625,7 @@
     });
     $("#commit-filter").addEventListener("input", (ev) => { S.filter = ev.target.value.trim().toLowerCase(); renderGraph(); });
     $("#graph").addEventListener("click", (ev) => { const r = ev.target.closest("[data-sha]"); if (r) showCommit(r.dataset.sha); });
+    $("#graph").addEventListener("focusin", (ev) => { const r = ev.target.closest("[data-sha]"); if (r) $$("#graph [data-sha]").forEach((e) => { e.tabIndex = e === r ? 0 : -1; }); });
     $("#graph").addEventListener("keydown", (ev) => { const r = ev.target.closest("[data-sha]"); if (!r) return; if (ev.key === "Enter") showCommit(r.dataset.sha); if (ev.key === "ArrowDown" && r.nextElementSibling) { ev.preventDefault(); r.nextElementSibling.focus(); } if (ev.key === "ArrowUp" && r.previousElementSibling && r.previousElementSibling.dataset.sha) { ev.preventDefault(); r.previousElementSibling.focus(); } });
     $("#btn-init").addEventListener("click", async () => { const cmd = await dialog("Initialize Argonauta store", "Optional: the command that runs this repository's tests, for example python3 -m pytest -q or .venv/bin/python -m pytest -q. It must be runnable from this machine. You can set it later.", { input: "Test command", ok: "Initialize" }); if (cmd === null) return; try { await api("POST", rp("/init"), { test_command: cmd }); toast("ok", "Store created in .argonauta/"); await refreshAll(); } catch (e) { toast("bad", e.message, true); } });
     $("#btn-index").addEventListener("click", async () => { const r = await runJob("index", {}, "Indexing"); if (r) toast("ok", "Indexed " + r.file_count + " files"); });
@@ -657,7 +675,7 @@
   async function boot() {
     S.token = readToken();
     if (!S.token) { document.body.innerHTML = '<main class="pane"><h1>Argonauta</h1><p class="empty">This page needs the one-time link printed by <code>argonauta ui</code>. Copy that URL (with its #token) into this tab.</p></main>'; return; }
-    wire();
+    wire(); selectTab("inspector", S.inspectorTab); // rail aria-pressed and tab markup agree from the start
     try { await loadWorkspaces(); } catch (err) { toast("bad", err.status === 401 ? "The token is not valid for this server. Re-open the URL printed by argonauta ui." : err.message, true); return; }
     await refreshAll(); startPolling();
   }

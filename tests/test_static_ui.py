@@ -42,7 +42,7 @@ def test_css_declares_slate_tokens_in_both_schemes():
 
 def test_topbar_structure():
     html = (STATIC / "index.html").read_text()
-    assert 'id="repo-switch"' in html and 'aria-haspopup="menu"' in html
+    assert 'id="repo-switch"' in html and 'aria-haspopup="dialog"' in html
     assert 'id="repo-menu"' in html and 'id="workspace-list"' in html
     assert 'id="workspace-select"' not in html and 'id="repo-select"' not in html
     assert 'class="logo" src="/logo.png" alt="" width="34" height="34"' in html
@@ -117,3 +117,27 @@ def test_copy_and_help_updated():
     assert "inspector" in readme.lower() and "rail" in readme.lower()
     web_ui = readme.split("## Web UI", 1)[1].split("## Command line", 1)[0]
     assert "sidebar" not in web_ui.lower()
+
+
+def test_icon_only_controls_have_labels():
+    html = (STATIC / "index.html").read_text()
+    for m in re.finditer(r'<button[^>]*class="[^"]*\bicon\b[^"]*"[^>]*>', html):
+        assert 'aria-label="' in m.group(0), m.group(0)
+    unlabeled = re.findall(r'<svg class="ic[^"]*"(?![^>]*aria-hidden="true")[^>]*>', html)
+    assert not unlabeled, unlabeled  # every inline icon in the markup is decorative and hidden
+    assert 'role="tablist"' in html and 'class="skip"' in html
+
+
+def test_accessibility_pass_fixes():
+    html = (STATIC / "index.html").read_text()
+    css = (STATIC / "app.css").read_text()
+    js = (STATIC / "app.js").read_text()
+    for key in ("branches", "changes", "proposals", "credentials"):  # rail toggles start unpressed
+        assert f'aria-pressed="false" data-rail="{key}"' in html, key
+    assert 'role="menu"' not in html and "menuitem" not in js and 'role="tree"' in html
+    assert "--on-warn:" in css and "color: #fff;" not in css
+    assert ".btn.ghost .ic" not in css and "border-radius: 8px" not in css
+    assert "changeCount: 0" in js and 'selectTab("inspector", S.inspectorTab)' in js
+    assert '"focusout"' in js and '$("#btn-diff-back").focus(' in js
+    assert "outline: 0" not in css.split(".filter:focus-within", 1)[1].split("}", 1)[0]  # the wrapper carries the ring
+    assert 'class="row-c" role="option" tabindex="0"' not in js  # the commit list is one Tab stop (roving tabindex)

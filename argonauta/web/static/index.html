@@ -40,7 +40,7 @@
 <a class="skip" href="#graph-panel">Skip to commit graph</a>
 <header class="topbar" role="banner">
   <div class="brand" id="brand"><img class="logo" src="/logo.png" alt="" width="34" height="34">Argonauta</div>
-  <button id="repo-switch" class="btn switcher" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="repo-menu" title="Switch repository"><svg class="ic" aria-hidden="true"><use href="#i-repo"/></svg><span id="repo-switch-label">No repository</span><svg class="ic xs" aria-hidden="true" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+  <button id="repo-switch" class="btn switcher" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="repo-menu" title="Switch repository"><svg class="ic" aria-hidden="true"><use href="#i-repo"/></svg><span id="repo-switch-label">No repository</span><svg class="ic xs" aria-hidden="true" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
   <div class="branch-pill" id="branch-pill" aria-live="polite" title="Current branch"></div>
   <label class="filter"><svg class="ic sm" aria-hidden="true"><use href="#i-search"/></svg><input id="commit-filter" type="search" placeholder="Filter commits" aria-label="Filter commits"><kbd>/</kbd></label>
   <div class="actions" role="group" aria-label="Remote actions">
@@ -55,22 +55,22 @@
     <button class="btn mini" id="btn-add-workspace" type="button"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Workspace</button>
     <button class="btn mini" id="btn-add-repo" type="button"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Repo</button>
   </div>
-  <ul id="workspace-list" class="tree" role="menu" aria-label="Workspaces and repositories"></ul>
+  <ul id="workspace-list" class="tree" role="tree" aria-label="Workspaces and repositories"></ul>
 </dialog>
 
 <main class="layout">
   <nav id="rail" class="rail" aria-label="Tools">
     <div class="rail-group">
-    <button class="btn icon ghost" type="button" data-rail="repos" aria-label="Repositories" title="Repositories"><svg class="ic lg" aria-hidden="true"><use href="#i-repo"/></svg></button>
+    <button class="btn icon ghost" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="repo-menu" data-rail="repos" aria-label="Repositories" title="Repositories"><svg class="ic lg" aria-hidden="true"><use href="#i-repo"/></svg></button>
     <button class="btn icon ghost" type="button" aria-pressed="false" data-rail="branches" aria-label="Branches" title="Branches"><svg class="ic lg" aria-hidden="true"><use href="#i-branch"/></svg></button>
-    <button class="btn icon ghost" type="button" data-rail="changes" aria-label="Changes" title="Changes"><svg class="ic lg" aria-hidden="true"><use href="#i-commit"/></svg><span class="badge warn" id="badge-changes" hidden></span></button>
-    <button class="btn icon ghost" type="button" data-rail="proposals" aria-label="Proposals" title="Proposals"><svg class="ic lg" aria-hidden="true"><use href="#i-zap"/></svg><span class="badge warn" id="badge-proposals" hidden></span></button>
+    <button class="btn icon ghost" type="button" aria-pressed="false" data-rail="changes" aria-label="Changes" title="Changes"><svg class="ic lg" aria-hidden="true"><use href="#i-commit"/></svg><span class="badge warn" id="badge-changes" hidden></span></button>
+    <button class="btn icon ghost" type="button" aria-pressed="false" data-rail="proposals" aria-label="Proposals" title="Proposals"><svg class="ic lg" aria-hidden="true"><use href="#i-zap"/></svg><span class="badge warn" id="badge-proposals" hidden></span></button>
     <button class="btn icon ghost" type="button" data-rail="terminal" aria-label="New terminal" title="New terminal"><svg class="ic lg" aria-hidden="true"><use href="#i-terminal"/></svg></button>
     <button class="btn icon ghost" type="button" data-rail="events" aria-label="Events" title="Events"><svg class="ic lg" aria-hidden="true"><use href="#i-activity"/></svg></button>
     </div>
     <div class="rail-group">
     <button class="btn icon ghost" type="button" data-rail="model" aria-label="Model" title="Model"><svg class="ic lg" aria-hidden="true"><use href="#i-cpu"/></svg></button>
-    <button class="btn icon ghost" type="button" data-rail="credentials" aria-label="Credentials" title="Credentials"><svg class="ic lg" aria-hidden="true"><use href="#i-key"/></svg></button>
+    <button class="btn icon ghost" type="button" aria-pressed="false" data-rail="credentials" aria-label="Credentials" title="Credentials"><svg class="ic lg" aria-hidden="true"><use href="#i-key"/></svg></button>
     </div>
   </nav>
 
