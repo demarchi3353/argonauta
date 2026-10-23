@@ -93,6 +93,7 @@ def test_index_and_static_served_without_token(api):
     assert status == 200 and b"<!doctype html" in body.lower()
     assert "no-store" in headers.get("Cache-Control", "")
     assert api.get("/app.js", token=None, origin=None, raw=True)[0] == 200
+    assert api.get("/patch.js", token=None, origin=None, raw=True)[0] == 200
     assert api.get("/app.css", token=None, origin=None, raw=True)[0] == 200
     assert api.get("/vendor/xterm.js", token=None, origin=None, raw=True)[0] == 200
     status, body, headers = api.get("/logo.png", token=None, origin=None, raw=True)
