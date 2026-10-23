@@ -376,6 +376,7 @@
   }
   function closeReport() {
     S.reportSeq++; // drop any report still loading
+    if (S.reviewSel !== null) { S.reviewSel = null; renderReviewHistory(); }
     if (!S.openReport) return;
     const hadFocus = $("#report-view").contains(document.activeElement) || $("#diff-view").contains(document.activeElement);
     S.openReport = null;
@@ -427,7 +428,7 @@
     } catch (err) { S.detail = null; closeStaleDetailDiff(); pane.innerHTML = '<div class="empty">✗ ' + esc(err.message) + "</div>"; }
   }
   async function showProposal(pid) {
-    S.selection = { type: "proposal", id: pid }; selectTab("inspector", "detail");
+    S.selection = { type: "proposal", id: pid }; selectTab("inspector", "detail"); renderReviewTab();
     const pane = $("#pane-detail"); pane.innerHTML = '<div class="muted"><span class="spinner"></span>Loading proposal…</div>';
     try {
       const d = await api("GET", rp("/proposals/" + pid)); const p = d.proposal, ch = d.change, runs = d.test_runs;
@@ -595,6 +596,19 @@
   function reviewSources() { const rs = S.state && S.state.store && S.state.store.review_sources; return rs || { branch_base: null, gh: { installed: false, logged_in: false, user: null, error: null } }; }
   function ghOk() { const g = reviewSources().gh; return !!(g && g.installed && g.logged_in); }
   function reviewModeOk(mode) { return mode !== "received" || (S.review.source === "pr" && !!S.review.pr); }
+  // radiogroups: one tab stop (the checked option, else the first enabled one); arrows move and select
+  function rovingTabindex(group) {
+    const opts = [...group.querySelectorAll('[role="radio"]')], enabled = opts.filter((b) => !b.disabled);
+    const stop = enabled.find((b) => b.getAttribute("aria-checked") === "true") || enabled[0];
+    opts.forEach((b) => { b.tabIndex = b === stop ? 0 : -1; });
+  }
+  function radioKeys(ev) {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[ev.key]; if (!step) return;
+    const group = ev.currentTarget, enabled = [...group.querySelectorAll('[role="radio"]')].filter((b) => !b.disabled); if (!enabled.length) return;
+    ev.preventDefault();
+    const i = enabled.indexOf(document.activeElement), next = enabled[((i < 0 ? 0 : i + step) + enabled.length) % enabled.length];
+    next.click(); next.focus();
+  }
   function renderReviewTab() {
     const rs = reviewSources(), gh = rs.gh || {}, st = S.state, R = S.review, hasRepo = !!(st && S.repoId);
     const commit = S.selection && S.selection.type === "commit" ? S.selection.sha : null;
@@ -603,7 +617,6 @@
     if (!reviewModeOk(R.mode)) R.mode = "code";
     $$("#review-source [data-source]").forEach((b) => { const s = b.dataset.source; b.disabled = !hasRepo || !avail[s]; b.setAttribute("aria-checked", String(R.source === s));
       b.title = !avail[s] ? (s === "commit" ? "Select a commit in the graph first" : s === "branch" ? (rs.branch_base ? "" : "No base branch found") : "gh must be installed and logged in") : ""; });
-    $$("#review-mode [data-mode]").forEach((b) => { const m = b.dataset.mode, ok = m !== "received" || (R.source === "pr" && !!R.pr); b.disabled = !hasRepo || !ok; b.setAttribute("aria-checked", String(R.mode === m)); b.title = ok ? "" : "Needs a pull request"; });
     let note = "";
     if (R.source === "commit") { const c = S.graph.find((x) => x.sha === commit); note = commit ? (c ? c.short + " " + c.subject : commit.slice(0, 7)) : "Select a commit in the graph."; }
     else if (R.source === "branch") note = rs.branch_base && st ? st.branch + " vs " + rs.branch_base : "No base branch (main, master or the upstream default) was found.";
@@ -615,7 +628,9 @@
     if (S.prs) { const html = S.prs.map((p) => '<option value="' + esc(p.number) + '">#' + esc(p.number) + " " + esc(p.title) + " (" + esc(p.author) + ")</option>").join(""); if (sel.dataset.html !== html) { sel.innerHTML = html; sel.dataset.html = html; } if (!S.prs.some((p) => String(p.number) === String(R.pr))) R.pr = S.prs.length ? String(S.prs[0].number) : null; sel.value = R.pr || ""; }
     else { sel.innerHTML = ""; sel.dataset.html = ""; }
     sel.disabled = !S.prs || !S.prs.length;
-    $$("#review-mode [data-mode]").forEach((b) => { if (b.dataset.mode === "received") { const ok = R.source === "pr" && !!R.pr; b.disabled = !hasRepo || !ok; b.title = ok ? "" : "Needs a pull request"; } });
+    if (!reviewModeOk(R.mode)) R.mode = "code";
+    $$("#review-mode [data-mode]").forEach((b) => { const m = b.dataset.mode, ok = reviewModeOk(m); b.disabled = !hasRepo || !ok; b.setAttribute("aria-checked", String(R.mode === m)); b.title = ok ? "" : "Needs a pull request"; });
+    rovingTabindex($("#review-source")); rovingTabindex($("#review-mode"));
     $("#review-draft-row").hidden = R.mode !== "mine";
     $("#review-gh").textContent = !st ? "" : !gh.installed ? "gh: not installed" : !gh.logged_in ? "gh: not logged in (run gh auth login)" : "gh: logged in as " + (gh.user || "?") + (S.prsOrigin ? " · origin " + S.prsOrigin : "");
     $("#review-run-label").textContent = R.mode === "code" ? "Review" : "Evaluate";
@@ -795,6 +810,7 @@
     });
     $("#review-source").addEventListener("click", (ev) => { const b = ev.target.closest("[data-source]"); if (!b || b.disabled) return; S.review.source = b.dataset.source; if (!reviewModeOk(S.review.mode)) S.review.mode = "code"; renderReviewTab(); if (b.dataset.source === "pr" && S.prs === null) loadPrs(); });
     $("#review-mode").addEventListener("click", (ev) => { const b = ev.target.closest("[data-mode]"); if (!b || b.disabled) return; S.review.mode = b.dataset.mode; renderReviewTab(); });
+    $("#review-source").addEventListener("keydown", radioKeys); $("#review-mode").addEventListener("keydown", radioKeys);
     $("#review-pr").addEventListener("change", (ev) => { S.review.pr = ev.target.value || null; renderReviewTab(); });
     $("#btn-review-prs").addEventListener("click", () => loadPrs());
     $("#btn-review-run").addEventListener("click", runReview);
@@ -834,7 +850,7 @@
       if (ev.key === "Escape") { if (document.querySelector("dialog[open]")) return; if (S.openDiff) { ev.preventDefault(); closeDiffView(); } else if (S.openReport) { ev.preventDefault(); closeReport(); } else if (S.sidePanel) { ev.preventDefault(); toggleSidePanel(S.sidePanel); } return; }
       const tag = (ev.target.tagName || "").toLowerCase(); if (["input", "textarea", "select"].includes(tag)) return;
       const num = ["1", "2", "3", "4", "5"].indexOf(ev.key); if (num >= 0) { ev.preventDefault(); if (ev.key === "4") showCredentials(); else selectTab("inspector", INSPECTOR_TABS[num]); return; }
-      if (ev.key === "r") { ev.preventDefault(); selectTab("inspector", "review"); renderReviewTab(); const d = $("#review-draft"); (S.review.mode === "mine" ? d : $("#btn-review-run")).focus(); return; }
+      if (ev.key === "r") { ev.preventDefault(); selectTab("inspector", "review"); renderReviewTab(); const want = S.review.mode === "mine" ? $("#review-draft") : $("#btn-review-run"); const target = !want.disabled ? want : $("#pane-review").querySelector('button:not([disabled]):not([tabindex="-1"]), select:not([disabled]), textarea:not([disabled])'); if (target) target.focus(); return; }
       if (ev.key === "p") { ev.preventDefault(); selectTab("inspector", "proposals"); $("#task").focus(); } if (ev.key === "c") { ev.preventDefault(); selectTab("inspector", "changes"); $("#commit-message").focus(); } if (ev.key === "t") { ev.preventDefault(); openTerminal(); } if (ev.key === "/") { ev.preventDefault(); $("#commit-filter").focus(); } if (ev.key === "?") { ev.preventDefault(); $("#help").showModal(); }
     });
     document.addEventListener("visibilitychange", () => { if (document.hidden) clearInterval(S.pollTimer); else startPolling(); });

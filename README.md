@@ -255,7 +255,9 @@ The report opens in the centre in place of the graph, like a file diff: the
 model's summary, then one card per finding with its verdict or severity,
 `path:line`, the quoted comment and its author, a title and the explanation.
 Clicking a card with a path opens that file's diff from the reviewed change;
-Back or `Esc` returns to the report, and `Esc` again to the graph. A reply the
+Back or `Esc` returns to the report, and `Esc` again to the graph. While a
+report is open, any file diff (also one opened from Changes or Detail) returns
+to the report on Back. A reply the
 model did not format is kept and shown raw. Past reviews are listed in the tab
 and reopen the report. Shortcuts: `5` opens the tab, `r` opens it and focuses
 the draft or the Review button.

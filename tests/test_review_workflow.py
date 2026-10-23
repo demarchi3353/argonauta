@@ -31,6 +31,15 @@ def test_truncate_diff_drops_largest_files_first_and_reports_them():
     assert truncate_diff("", limit=10) == ("", [])
 
 
+def test_truncate_diff_splits_only_on_newlines():
+    # a form feed (or \x1c, \u2028) inside a line must not start a phantom chunk
+    a = "diff --git a/a b/a\n+page one\x0cdiff --git not a header\n"
+    b = "diff --git a/b b/b\n" + "+y" * 50 + "\n"
+    assert truncate_diff("pre\n" + a + b, limit=10_000) == ("pre\n" + a + b, [])
+    kept, dropped = truncate_diff("pre\n" + a + b, limit=len(a) + 10)
+    assert dropped == ["b"] and kept == "pre\n" + a
+
+
 def test_review_code_on_worktree_stores_findings(review_env):
     settings, store, repo = review_env
     (repo / "calc" / "core.py").write_text((repo / "calc" / "core.py").read_text() + "\n# touched\n")
@@ -47,6 +56,15 @@ def test_review_branch_falls_back_to_master_and_fails_without_base(review_env):
     assert out.review.source_label == "feature vs master" and "new.txt" in out.review.source_diff
     git(repo, "branch", "-m", "master", "trunk")
     with pytest.raises(WorkflowError, match="main or master"):
+        review(settings, store, ReviewSpec(mode="code", source_kind="branch"))
+
+
+def test_review_branch_without_merge_base_is_a_workflow_error(review_env, monkeypatch):
+    settings, store, repo = review_env
+    def boom(root, base):
+        raise workflow.gitops.GitError("fatal: no merge base")
+    monkeypatch.setattr(workflow.gitops, "range_diff", boom)
+    with pytest.raises(WorkflowError, match="Could not compare .* no merge base"):
         review(settings, store, ReviewSpec(mode="code", source_kind="branch"))
 
 

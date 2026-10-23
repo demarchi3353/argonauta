@@ -284,6 +284,9 @@ def _chunk_path(header: str) -> str:
     return rest
 
 
+_FILE_HEADER_SPLIT = re.compile(r"(?m)^(?=diff --git )")
+
+
 def truncate_diff(diff: str, limit: int = DIFF_CHAR_LIMIT) -> tuple[str, list[str]]:
     """Drop whole files, largest first, until the diff fits in `limit` characters.
 
@@ -293,15 +296,10 @@ def truncate_diff(diff: str, limit: int = DIFF_CHAR_LIMIT) -> tuple[str, list[st
     one is dropped first. Returns the kept diff and the dropped paths in their
     original order.
     """
-    preamble = ""
-    chunks: list[str] = []
-    for line in diff.splitlines(keepends=True):
-        if line.startswith("diff --git "):
-            chunks.append(line)
-        elif chunks:
-            chunks[-1] += line
-        else:
-            preamble += line
+    # split on "\n" only: str.splitlines also breaks at \x0c, \x1c, \u2028 ... inside lines
+    parts = _FILE_HEADER_SPLIT.split(diff)
+    preamble = "" if parts[0].startswith("diff --git ") else parts.pop(0)
+    chunks = [p for p in parts if p]
     total = len(diff)
     dropped: set[int] = set()
     for i in sorted(range(len(chunks)), key=lambda i: (-len(chunks[i]), -i)):
@@ -351,7 +349,11 @@ def _source_branch(settings: Settings) -> _Source:
     if base is None:
         raise WorkflowError("No main or master branch to compare against")
     branch = gitops.current_branch(root)
-    return _Source(label=f"{branch} vs {base}", diff=gitops.range_diff(root, base), source_ref=base)
+    try:
+        diff = gitops.range_diff(root, base)
+    except gitops.GitError as exc:
+        raise WorkflowError(f"Could not compare {branch} with {base}: {exc}") from exc
+    return _Source(label=f"{branch} vs {base}", diff=diff, source_ref=base)
 
 
 def _source_pr(settings: Settings, number: int, with_comments: bool) -> _Source:

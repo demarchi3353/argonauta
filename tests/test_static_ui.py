@@ -169,3 +169,20 @@ def test_report_view_markup_and_handlers():
     assert "Not sent to the model" in js and "ignored the format" in js
     readme = (STATIC.parent.parent.parent / "README.md").read_text(encoding="utf-8")
     assert "### Review" in readme and "gh" in readme.split("### Review", 1)[1][:3000]
+
+
+def test_review_tab_keyboard_and_selection_polish():
+    js = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "function rovingTabindex" in js and "function radioKeys" in js
+    assert 'rovingTabindex($("#review-source"))' in js and 'rovingTabindex($("#review-mode"))' in js
+    assert '$("#review-source").addEventListener("keydown", radioKeys)' in js and '$("#review-mode").addEventListener("keydown", radioKeys)' in js
+    for key in ("ArrowRight", "ArrowLeft", "ArrowUp", "ArrowDown"): assert key in js.split("function radioKeys", 1)[1].split("\n  }", 1)[0]
+    close = js.split("function closeReport", 1)[1].split("\n  }", 1)[0]
+    assert "S.reviewSel = null" in close and "renderReviewHistory()" in close
+    assert "renderReviewTab()" in js.split("async function showProposal", 1)[1].split("\n", 2)[1]
+    r_key = [l for l in js.splitlines() if 'ev.key === "r"' in l][0]
+    assert "want.disabled" in r_key
+    render = js.split("function renderReviewTab", 1)[1].split("\n  function ", 1)[0]
+    assert render.count('#review-mode [data-mode]') == 1  # one loop sets the mode buttons
+    readme = (STATIC.parent.parent.parent / "README.md").read_text(encoding="utf-8")
+    assert "any file diff" in readme

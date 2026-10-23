@@ -7,7 +7,7 @@ This is the only module that ever invokes `gh`. Safety rules:
 - The environment is an allow-list (see `gh_env`); token variables such as
   GH_TOKEN, GITHUB_TOKEN and GH_ENTERPRISE_TOKEN are never passed on, so `gh`
   uses only the login stored by `gh auth login`.
-- Only read commands are used: `auth status`, `api user`, `pr list/view/diff`
+- Only read commands are used: `api user`, `pr list/view/diff`
   and GET requests to `repos/...`.
 """
 
@@ -43,7 +43,8 @@ class GitHubError(RuntimeError):
 def find_gh_bin() -> str | None:
     override = os.environ.get("ARGONAUTA_GH_BIN", "").strip()
     if override:
-        return override
+        # a bare name ("gh2") resolves through PATH; a path is kept as given
+        return override if os.sep in override else (shutil.which(override) or override)
     return shutil.which("gh")
 
 
@@ -57,7 +58,7 @@ def _run(repo_root: Path | None, args: list[str]) -> str:
         raise GitHubError(INSTALL_HINT)
     try:
         proc = subprocess.run(
-            [binary, *args], capture_output=True, text=True, errors="replace",
+            [binary, *args], capture_output=True, text=True, errors="replace", stdin=subprocess.DEVNULL,
             timeout=GH_TIMEOUT, env=gh_env(), cwd=repo_root,
         )
     except (FileNotFoundError, PermissionError) as exc:
@@ -101,17 +102,18 @@ def gh_status() -> dict:
         info["error"] = INSTALL_HINT
         return info
     info["installed"] = True
+    # `gh auth status` fails when any stored account is broken, even if the active one works;
+    # `gh api user` uses the active account, which is what every other call here uses too.
     try:
-        _run(None, ["auth", "status", "--hostname", "github.com"])
+        user = _run(None, ["api", "user", "--jq", ".login"]).strip().strip('"')
     except GitHubError:
+        user = ""
+    if not user:
         info["logged_in"] = False
         info["error"] = LOGIN_HINT
         return info
     info["logged_in"] = True
-    try:
-        info["user"] = _run(None, ["api", "user", "--jq", ".login"]).strip() or None
-    except GitHubError as exc:
-        info["error"] = str(exc)
+    info["user"] = user
     return info
 
 
@@ -133,6 +135,18 @@ def _number(number: int) -> str:
     return str(number)
 
 
+def _expect(value, kind: type):
+    if not isinstance(value, kind):
+        raise GitHubError("unexpected gh output")
+    return value
+
+
+def _items(values) -> list[dict]:
+    if not isinstance(values, list) or not all(isinstance(v, dict) for v in values):
+        raise GitHubError("unexpected gh output")
+    return values
+
+
 def _login(user) -> str:
     return (user or {}).get("login", "") if isinstance(user, dict) else ""
 
@@ -142,7 +156,7 @@ def list_prs(repo_root: Path) -> list[dict]:
         "pr", "list", "--repo", origin_slug(repo_root), "--state", "open", "--limit", "50",
         "--json", "number,title,author,headRefName,updatedAt",
     ])
-    return [{**pr, "author": _login(pr.get("author"))} for pr in data]
+    return [{**pr, "author": _login(pr.get("author"))} for pr in _items(data)]
 
 
 def pr_detail(repo_root: Path, number: int) -> dict:
@@ -151,6 +165,7 @@ def pr_detail(repo_root: Path, number: int) -> dict:
         "pr", "view", n, "--repo", origin_slug(repo_root),
         "--json", "number,title,body,author,baseRefName,headRefName,url",
     ])
+    _expect(pr, dict)
     return {**pr, "author": _login(pr.get("author"))}
 
 
@@ -164,19 +179,19 @@ def pr_comments(repo_root: Path, number: int) -> list[dict]:
     n = _number(number)
     slug = origin_slug(repo_root)
     out: list[dict] = []
-    for c in _run_json_pages(repo_root, ["api", f"repos/{slug}/pulls/{n}/comments", "--paginate"]):
+    for c in _items(_run_json_pages(repo_root, ["api", f"repos/{slug}/pulls/{n}/comments", "--paginate"])):
         out.append({
             "author": _login(c.get("user")), "body": c.get("body") or "", "path": c.get("path"),
             "line": c.get("line") or c.get("original_line"), "hunk": c.get("diff_hunk"),
             "created_at": c.get("created_at") or "",
         })
-    for r in _run_json_pages(repo_root, ["api", f"repos/{slug}/pulls/{n}/reviews", "--paginate"]):
+    for r in _items(_run_json_pages(repo_root, ["api", f"repos/{slug}/pulls/{n}/reviews", "--paginate"])):
         if (r.get("body") or "").strip():
             out.append({
                 "author": _login(r.get("user")), "body": r["body"], "path": None,
                 "line": None, "hunk": None, "created_at": r.get("submitted_at") or "",
             })
-    for c in _run_json_pages(repo_root, ["api", f"repos/{slug}/issues/{n}/comments", "--paginate"]):
+    for c in _items(_run_json_pages(repo_root, ["api", f"repos/{slug}/issues/{n}/comments", "--paginate"])):
         out.append({
             "author": _login(c.get("user")), "body": c.get("body") or "", "path": None,
             "line": None, "hunk": None, "created_at": c.get("created_at") or "",

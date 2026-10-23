@@ -424,8 +424,8 @@ def test_review_routes(api, monkeypatch, tmp_path):
 def test_cached_gh_status_spawns_gh_once(monkeypatch, tmp_path):
     from argonauta.web import api as api_mod
     from tests.test_github import fake_gh
-    monkeypatch.setenv("ARGONAUTA_GH_BIN", str(fake_gh(tmp_path, {"auth status": "", "api user": '"me"'})))
+    monkeypatch.setenv("ARGONAUTA_GH_BIN", str(fake_gh(tmp_path, {"api user": '"me"'})))
     monkeypatch.setattr(api_mod, "_gh_status_cache", None)
     first = api_mod.cached_gh_status(); second = api_mod.cached_gh_status()
     assert first == second
-    assert (tmp_path / "argv.txt").read_text().count("auth status") == 1
+    assert (tmp_path / "argv.txt").read_text().count("api user") == 1
