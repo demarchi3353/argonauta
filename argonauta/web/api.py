@@ -8,7 +8,9 @@ resolved through the registry.
 from __future__ import annotations
 
 import dataclasses
+import os
 import re
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -221,12 +223,28 @@ def _status_areas(entries: list[gitops.FileStatus]) -> dict:
     return areas
 
 
+_gh_status_cache: tuple[float, str, dict] | None = None
+
+
+def cached_gh_status(ttl: float = 60.0) -> dict:
+    """gh_status() spawns gh (one call hits the network); /state is polled, so reuse it briefly."""
+    global _gh_status_cache
+    key = os.environ.get("ARGONAUTA_GH_BIN", "")
+    now = time.monotonic()
+    cached = _gh_status_cache
+    if cached is not None and cached[1] == key and now - cached[0] < ttl:
+        return cached[2]
+    status = gh_status()
+    _gh_status_cache = (now, key, status)
+    return status
+
+
 def _store_summary(repo: Repo) -> dict:
     from argonauta.workflow import test_command_for
 
     settings = repo_settings(repo)
     summary = {"initialized": repo.initialized, "indexed_files": None, "last_indexed_at": None, "test_command": None, "provider": describe_provider(settings), "provider_name": settings.effective_provider}
-    summary["review_sources"] = {"branch_base": gitops.default_base_branch(repo.path) or None, "gh": gh_status()}
+    summary["review_sources"] = {"branch_base": gitops.default_base_branch(repo.path) or None, "gh": cached_gh_status()}
     if repo.initialized:
         store = open_store(repo)
         try:
@@ -574,9 +592,6 @@ def assistant_job(ctx, params, query, body):
         source = body.get("source")
         if not isinstance(source, dict):
             raise ApiError(400, "source must be an object")
-        for key in ("kind", "ref"):
-            if not isinstance(source.get(key, ""), str):
-                raise ApiError(400, f"source.{key} must be a string")
         review_spec = workflow.ReviewSpec(
             mode=require_str(body, "mode", 20),
             source_kind=require_str(source, "kind", 20),
@@ -645,7 +660,7 @@ def _require_initialized(repo: Repo) -> None:
 
 @route("GET", r"^/api/github/status$")
 def github_status(ctx, params, query, body):
-    return 200, gh_status()
+    return 200, cached_gh_status()
 
 
 @route("GET", rf"^/api/repos/(?P<rid>{ID})/github/prs$")
