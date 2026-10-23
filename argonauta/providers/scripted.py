@@ -7,7 +7,7 @@ network access. `argonauta status` labels it as not a real model.
 from __future__ import annotations
 
 from argonauta.config import Settings
-from argonauta.prompts import ProposalRequest
+from argonauta.prompts import ProposalRequest, ReviewRequest
 from argonauta.providers.base import ProgressCallback, ProviderError, ProviderReply
 
 
@@ -18,6 +18,12 @@ class ScriptedProvider:
         self.settings = settings
 
     def propose(self, req: ProposalRequest, on_progress: ProgressCallback | None = None) -> ProviderReply:
+        return self._replay()
+
+    def review(self, req: ReviewRequest, on_progress: ProgressCallback | None = None) -> ProviderReply:
+        return self._replay()
+
+    def _replay(self) -> ProviderReply:
         path = self.settings.scripted_diff
         if path is None or not path.is_file():
             raise ProviderError("ARGONAUTA_SCRIPTED_DIFF must point to an existing file when the provider is 'scripted'.")

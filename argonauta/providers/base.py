@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from argonauta.prompts import ProposalRequest
+from argonauta.prompts import ProposalRequest, ReviewRequest
 
 
 class ProviderError(RuntimeError):
@@ -30,3 +30,5 @@ class Provider(Protocol):
     name: str
 
     def propose(self, req: ProposalRequest, on_progress: ProgressCallback | None = None) -> ProviderReply: ...
+
+    def review(self, req: ReviewRequest, on_progress: ProgressCallback | None = None) -> ProviderReply: ...

@@ -16,7 +16,14 @@ import urllib.error
 import urllib.request
 
 from argonauta.config import Settings
-from argonauta.prompts import SYSTEM_PROMPT, ProposalRequest, build_user_message
+from argonauta.prompts import (
+    REVIEW_SYSTEM_PROMPT,
+    SYSTEM_PROMPT,
+    ProposalRequest,
+    ReviewRequest,
+    build_review_message,
+    build_user_message,
+)
 from argonauta.providers.base import ProgressCallback, ProviderError, ProviderReply
 
 REQUEST_TIMEOUT = 600
@@ -33,11 +40,17 @@ class LocalProvider:
         self.endpoint = settings.local_url + "/chat/completions"
 
     def propose(self, req: ProposalRequest, on_progress: ProgressCallback | None = None) -> ProviderReply:
+        return self._complete(SYSTEM_PROMPT, build_user_message(req), on_progress)
+
+    def review(self, req: ReviewRequest, on_progress: ProgressCallback | None = None) -> ProviderReply:
+        return self._complete(REVIEW_SYSTEM_PROMPT, build_review_message(req), on_progress)
+
+    def _complete(self, system: str, user: str, on_progress: ProgressCallback | None = None) -> ProviderReply:
         payload = {
             "model": self.settings.local_model,
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": build_user_message(req)},
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
             ],
             "stream": False,
         }

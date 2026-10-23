@@ -17,7 +17,14 @@ import subprocess
 import tempfile
 
 from argonauta.config import Settings
-from argonauta.prompts import SYSTEM_PROMPT, ProposalRequest, build_user_message
+from argonauta.prompts import (
+    REVIEW_SYSTEM_PROMPT,
+    SYSTEM_PROMPT,
+    ProposalRequest,
+    ReviewRequest,
+    build_review_message,
+    build_user_message,
+)
 from argonauta.providers.base import ProgressCallback, ProviderError, ProviderReply, ProviderUnavailable
 
 REQUEST_TIMEOUT = 900
@@ -62,20 +69,26 @@ class ClaudeCliProvider:
             raise ProviderUnavailable(f"The Claude Code CLI (`claude`) was not found. {INSTALL_HINT}")
 
     def propose(self, req: ProposalRequest, on_progress: ProgressCallback | None = None) -> ProviderReply:
+        return self._complete(SYSTEM_PROMPT, build_user_message(req), on_progress)
+
+    def review(self, req: ReviewRequest, on_progress: ProgressCallback | None = None) -> ProviderReply:
+        return self._complete(REVIEW_SYSTEM_PROMPT, build_review_message(req), on_progress)
+
+    def _complete(self, system: str, user: str, on_progress: ProgressCallback | None = None) -> ProviderReply:
         args = [
             self.binary, "-p",
             "--output-format", "json",
             "--tools", "",
             "--no-session-persistence",
             "--setting-sources", "",
-            "--system-prompt", SYSTEM_PROMPT,
+            "--system-prompt", system,
             "--model", self.settings.model,
         ]
         if on_progress:
             on_progress(f"asking Claude Code ({self.settings.model})")
         with tempfile.TemporaryDirectory(prefix="argonauta-claude-") as cwd:
             try:
-                proc = subprocess.run(args, input=build_user_message(req), capture_output=True, text=True, errors="replace", cwd=cwd, env=_clean_env(), timeout=REQUEST_TIMEOUT)
+                proc = subprocess.run(args, input=user, capture_output=True, text=True, errors="replace", cwd=cwd, env=_clean_env(), timeout=REQUEST_TIMEOUT)
             except FileNotFoundError as exc:
                 raise ProviderUnavailable(f"The Claude Code CLI could not be started. {INSTALL_HINT}") from exc
             except subprocess.TimeoutExpired as exc:

@@ -93,3 +93,18 @@ def test_user_settings_can_select_the_provider(sample_repo, clean_env, monkeypat
     assert load_settings(sample_repo).effective_provider == "manual"  # the shell still wins
     with pytest.raises(Exception, match="provider"):
         save_user_settings({"provider": "nonsense"})
+
+
+def _review_req():
+    from argonauta.prompts import ReviewRequest
+    return ReviewRequest(mode="code", source_kind="worktree", source_label="Working tree", diff="diff --git a/a b/a\n", omitted_files=[], comments=[], draft="", pr_title="", pr_body="", repo_summary="root: demo")
+
+
+def test_claude_cli_review_uses_the_review_system_prompt(cli_env, monkeypatch, tmp_path):
+    from argonauta.prompts import REVIEW_SYSTEM_PROMPT
+    body = json.dumps({"type": "result", "is_error": False, "result": "```json\n{\"summary\": \"ok\", \"findings\": []}\n```", "usage": {"input_tokens": 3, "output_tokens": 2}})
+    monkeypatch.setenv("ARGONAUTA_CLAUDE_BIN", str(fake_claude(tmp_path, body)))
+    reply = get_provider(load_settings(cli_env)).review(_review_req())
+    assert "findings" in reply.text
+    argv = (tmp_path / "argv.txt").read_text()
+    assert REVIEW_SYSTEM_PROMPT.splitlines()[0] in argv and "<mode>" in (tmp_path / "stdin.txt").read_text()
