@@ -128,8 +128,9 @@ network.
 
 ### Workspaces and repositories
 
-A workspace is a named group of repositories. Pick one in the top-left
-selector or in the sidebar tree; pick a repository the same way. Everything
+A workspace is a named group of repositories. Pick one in the repository
+switcher, the popover that opens from the breadcrumb in the topbar or from the
+Repositories button on the rail; pick a repository the same way. Everything
 else on the page (branches, commits, changes, terminals, credentials, the
 assistant) belongs to the selected repository. A workspace with no repositories
 says so in place of the graph and offers "Add a repository"; repository-scoped
@@ -142,8 +143,8 @@ only; nothing on disk is touched.
 
 ### Worktrees: one checkout per task, one terminal each
 
-Hovering a repository in the sidebar shows a "+" with a folder icon: **New
-worktree**. It asks for a name and creates `<repo>/.worktrees/<name>` as a git
+Hovering a repository in the repository switcher shows a "+" with a folder
+icon: **New worktree**. It asks for a name and creates `<repo>/.worktrees/<name>` as a git
 worktree on a new branch of the same name, cut from the current HEAD (the
 `.worktrees/` folder is excluded through `.git/info/exclude`, so it never shows
 up as untracked). The worktree appears nested under its repository and works
@@ -206,7 +207,7 @@ you do.
 
 ### Credentials panel
 
-The "Credentials" tab on the right shows, read-only, what git will use for the
+The Credentials tab of the inspector shows, read-only, what git will use for the
 selected repository: the git identity (`user.name`, `user.email`) and where it
 comes from; the SSH host alias the remote resolves to, the identity files
 `ssh -G` would try with their type and fingerprint, and whether the key is
@@ -217,8 +218,8 @@ The panel reads `git config`, `ssh -G`, `ssh-keygen -l` on `.pub` files,
 
 ### Assistant
 
-The "Proposals" tab in the inspector is the assistant. A repository without a store
-shows an "Initialize" button (optionally with the test command). Then
+The "Proposals" tab in the inspector is the assistant. A repository without a
+store shows an "Initialize" button (optionally with the test command). Then
 "Index" scans the files, the task field plus "Propose" asks the provider for a
 diff ("Dry run" only shows which files would be sent), and a proposal opens in
 the Detail tab with its explanation and diff and the actions Apply (with "run
@@ -234,9 +235,10 @@ background with a progress toast; one runs at a time per repository.
 
 Shortcuts: `1`–`4` inspector tabs (Detail, Changes, Proposals, Credentials),
 `p` proposal field, `c` commit message, `t` new terminal, `/` filter commits,
-`?` help, `Esc` closes dialogs, the diff view, the branches panel and menus. Every control is reachable with
-Tab and has a visible focus ring; arrows move through the commit list and
-Enter opens the focused item. Status is always shown with a symbol and text,
+`?` help, `Esc` closes dialogs, the diff view, the branches panel and menus.
+Every control is reachable
+with Tab and has a visible focus ring; arrows move through the commit list
+and Enter opens the focused item. Status is always shown with a symbol and text,
 never colour alone. The theme follows your OS.
 
 Every panel has an explicit empty state that names the next step, loading
@@ -375,10 +377,10 @@ and points at `pip install 'argonauta[anthropic]'`.
   and branch switches use `git switch`, which cannot touch files.
 - **Network**: the page talks only to the loopback server that `argonauta ui`
   started, authenticated with a per-run token, and loads no external script,
-  font or image (the fonts are vendored). Fetch, pull and push talk to your remotes with your own
-  credentials. The model request goes to the Anthropic API or to the local
-  model URL, and only when a provider is configured and you propose without
-  "Dry run" or `--from-diff`; it contains the system prompt, your task text, a
+  font or image (the fonts are vendored). Fetch, pull and push talk to your
+  remotes with your own credentials. The model request goes to the Anthropic
+  API or to the local model URL, and only when a provider is configured and you
+  propose without "Dry run" or `--from-diff`; it contains the system prompt, your task text, a
   short repository summary (name, branch, file count, languages) and the
   contents of the selected context files. Nothing else is ever sent anywhere.
 - **`.env` is read with an allowlist.** Only `ANTHROPIC_API_KEY` and the

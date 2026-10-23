@@ -115,3 +115,5 @@ def test_copy_and_help_updated():
     assert "<dt>1–4</dt>" in html or "<dt>1-4</dt>" in html
     assert 'class="logo-hero" src="/logo.png" alt="" width="96" height="96"' in html
     assert "inspector" in readme.lower() and "rail" in readme.lower()
+    web_ui = readme.split("## Web UI", 1)[1].split("## Command line", 1)[0]
+    assert "sidebar" not in web_ui.lower()
