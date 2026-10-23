@@ -93,6 +93,7 @@ def test_index_and_static_served_without_token(api):
     assert status == 200 and b"<!doctype html" in body.lower()
     assert "no-store" in headers.get("Cache-Control", "")
     assert api.get("/app.js", token=None, origin=None, raw=True)[0] == 200
+    assert api.get("/patch.js", token=None, origin=None, raw=True)[0] == 200
     assert api.get("/app.css", token=None, origin=None, raw=True)[0] == 200
     assert api.get("/vendor/xterm.js", token=None, origin=None, raw=True)[0] == 200
     status, body, headers = api.get("/logo.png", token=None, origin=None, raw=True)
@@ -100,6 +101,9 @@ def test_index_and_static_served_without_token(api):
     assert api.get("/favicon.ico", token=None, origin=None, raw=True)[0] == 200
     assert api.get("/../pyproject.toml", token=None, origin=None, raw=True)[0] == 404
     assert api.get("/static/../../pyproject.toml", token=None, origin=None, raw=True)[0] == 404
+    for name in ("IBMPlexSans-Regular", "IBMPlexSans-Medium", "IBMPlexSans-SemiBold", "JetBrainsMono-Regular", "JetBrainsMono-Medium"):
+        status, body, headers = api.get(f"/vendor/fonts/{name}.woff2", token=None, origin=None, raw=True)
+        assert status == 200 and headers.get("Content-Type") == "font/woff2" and body[:4] == b"wOF2", name
 
 
 def test_api_requires_token_origin_and_host(api):
