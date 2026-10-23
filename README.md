@@ -294,7 +294,8 @@ the draft or the Review button.
 Shortcuts: `1`–`4` inspector tabs (Detail, Changes, Proposals, Credentials),
 `5` Review, `r` review, `p` proposal field, `c` commit message, `t` new
 terminal, `b` toggles the Branches panel, `/` filter commits,
-`?` help, `Esc` closes dialogs, the diff view, the review report, the branches panel and menus.
+`?` help, `Esc` closes dialogs, the diff view, the review report, the
+branches panel and menus.
 Every control is reachable
 with Tab and has a visible focus ring; arrows move through the commit list
 and Enter opens the focused item. Status is always shown with a symbol and text,
