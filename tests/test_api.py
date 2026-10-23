@@ -94,6 +94,7 @@ def test_index_and_static_served_without_token(api):
     assert "no-store" in headers.get("Cache-Control", "")
     assert api.get("/app.js", token=None, origin=None, raw=True)[0] == 200
     assert api.get("/patch.js", token=None, origin=None, raw=True)[0] == 200
+    assert api.get("/report.js", token=None, origin=None, raw=True)[0] == 200
     assert api.get("/app.css", token=None, origin=None, raw=True)[0] == 200
     assert api.get("/vendor/xterm.js", token=None, origin=None, raw=True)[0] == 200
     status, body, headers = api.get("/logo.png", token=None, origin=None, raw=True)
@@ -407,7 +408,11 @@ def test_review_routes(api, monkeypatch, tmp_path):
     monkeypatch.setenv("ARGONAUTA_GH_BIN", str(fake_gh(tmp_path, {"pr list": '[{"number": 3, "title": "T", "author": {"login": "me"}, "headRefName": "b", "updatedAt": "x"}]', "api user": '"me"'})))
     status, data = api.get(f"{r}/github/prs")
     assert status == 200 and data["origin"] == "o/r" and data["prs"][0]["number"] == 3
-    assert api.get(f"{r}/state")[1]["store"]["review_sources"]["branch_base"] in ("main", "master")
+    sources = api.get(f"{r}/state")[1]["store"]["review_sources"]
+    assert sources["branch_base"] in ("main", "master") and sources["gh"] == {"installed": True}  # no login check on /state
+    assert "api user" not in (tmp_path / "argv.txt").read_text()
+    assert api.get("/api/github/status?refresh=1")[1] == {"installed": True, "logged_in": True, "user": "me", "error": None}
+    assert (tmp_path / "argv.txt").read_text().count("api user") == 1
     assert api.post(f"{r}/jobs/review", {"mode": "received", "source": {"kind": "worktree", "ref": ""}, "draft": ""})[0] == 400
     assert api.post(f"{r}/jobs/review", {"mode": "mine", "source": {"kind": "worktree", "ref": ""}, "draft": ""})[0] == 400
     (repo.path / "calc" / "core.py").write_text((repo.path / "calc" / "core.py").read_text() + "\n# x\n")
@@ -429,3 +434,5 @@ def test_cached_gh_status_spawns_gh_once(monkeypatch, tmp_path):
     first = api_mod.cached_gh_status(); second = api_mod.cached_gh_status()
     assert first == second
     assert (tmp_path / "argv.txt").read_text().count("api user") == 1
+    assert api_mod.cached_gh_status(refresh=True) == first
+    assert (tmp_path / "argv.txt").read_text().count("api user") == 2

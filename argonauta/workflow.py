@@ -14,7 +14,7 @@ from pathlib import Path
 from argonauta import github, gitops
 from argonauta.config import Settings
 from argonauta.db import Store, StoreError
-from argonauta.diffs import ValidationResult, validate_diff
+from argonauta.diffs import FORBIDDEN_PREFIXES, ValidationResult, validate_diff
 from argonauta.indexer import search
 from argonauta.logging_setup import get_logger
 from argonauta.models import REVIEW_MODES, REVIEW_SOURCES, Change, Proposal, Review, TestRun
@@ -243,6 +243,8 @@ DIFF_CHAR_LIMIT = 300_000
 COMMENT_LIMIT = 200
 DRAFT_CHAR_LIMIT = 20_000
 ALL_FILES_OMITTED_NOTE = "every file was omitted because the diff exceeds the limit"
+HEADERLESS_CUT_NOTE = "diff had no file headers and was cut to the limit"
+EMPTY_SOURCE_ERROR = "Nothing to review: the source diff is empty"
 _SHA_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
 _HEADER_PATHS_RE = re.compile(r"^a/(.*) b/(.*)$")
 _FILE_HEADER_RE = re.compile(r"^diff --git ", re.MULTILINE)
@@ -287,14 +289,16 @@ def _chunk_path(header: str) -> str:
 _FILE_HEADER_SPLIT = re.compile(r"(?m)^(?=diff --git )")
 
 
-def truncate_diff(diff: str, limit: int = DIFF_CHAR_LIMIT) -> tuple[str, list[str]]:
+def truncate_diff(diff: str, limit: int = DIFF_CHAR_LIMIT, notes: list[str] | None = None) -> tuple[str, list[str]]:
     """Drop whole files, largest first, until the diff fits in `limit` characters.
 
     The diff is split at column-0 `diff --git ` lines (inside a hunk every line
     starts with "+", "-", " " or "\\", so these are always file boundaries). Text
     before the first header is kept as is. Among files of equal size the later
     one is dropped first. Returns the kept diff and the dropped paths in their
-    original order.
+    original order. When the text before the first header (or a diff with no
+    header at all) is still over the limit, it is cut at the last newline that
+    fits and HEADERLESS_CUT_NOTE is appended to `notes`.
     """
     # split on "\n" only: str.splitlines also breaks at \x0c, \x1c, \u2028 ... inside lines
     parts = _FILE_HEADER_SPLIT.split(diff)
@@ -307,8 +311,39 @@ def truncate_diff(diff: str, limit: int = DIFF_CHAR_LIMIT) -> tuple[str, list[st
             break
         dropped.add(i)
         total -= len(chunks[i])
-    kept = preamble + "".join(c for i, c in enumerate(chunks) if i not in dropped)
+    rest = "".join(c for i, c in enumerate(chunks) if i not in dropped)
+    if len(preamble) + len(rest) > limit:
+        room = max(0, limit - len(rest))
+        cut = preamble[:room]
+        preamble = cut[: cut.rfind("\n") + 1] if "\n" in cut else cut
+        if notes is not None:
+            notes.append(HEADERLESS_CUT_NOTE)
+    kept = preamble + rest
     return kept, [_chunk_path(chunks[i].split("\n", 1)[0]) for i in sorted(dropped)]
+
+
+def _excluded_review_path(path: str) -> bool:
+    """Same rule as proposals: never send .env* files or anything under .git/ or .argonauta/."""
+    if any(path.startswith(pre) for pre in FORBIDDEN_PREFIXES):
+        return True
+    return path.rsplit("/", 1)[-1].startswith(".env")
+
+
+def _drop_excluded(diff: str) -> tuple[str, list[str]]:
+    """Remove the file chunks whose old or new path is excluded; return the rest and the dropped paths."""
+    parts = _FILE_HEADER_SPLIT.split(diff)
+    kept: list[str] = []
+    dropped: list[str] = []
+    for part in parts:
+        if part.startswith("diff --git "):
+            header = part.split("\n", 1)[0]
+            m = _HEADER_PATHS_RE.match(header.rstrip("\r")[len("diff --git "):])
+            paths = {_chunk_path(header)} | ({m.group(1), m.group(2)} if m else set())
+            if any(_excluded_review_path(p) for p in paths):
+                dropped.append(_chunk_path(header))
+                continue
+        kept.append(part)
+    return "".join(kept), dropped
 
 
 def validate_review_spec(spec: ReviewSpec) -> None:
@@ -340,7 +375,14 @@ def _source_commit(settings: Settings, sha: str) -> _Source:
     except gitops.GitError as exc:
         raise WorkflowError(f"Could not read commit {sha}: {exc}") from exc
     c = detail.commit
-    return _Source(label=f"commit {c.short} {c.subject}", diff=detail.diff, source_ref=c.sha)
+    diff = detail.diff
+    try:
+        if len(gitops.commit_parents(settings.repo_root, c.sha)) > 1:
+            # `git show` gives a combined `diff --cc` (or nothing) for merges; review against the first parent.
+            diff = gitops.commit_diff_first_parent(settings.repo_root, c.sha)
+    except gitops.GitError as exc:
+        raise WorkflowError(f"Could not read commit {sha}: {exc}") from exc
+    return _Source(label=f"commit {c.short} {c.subject}", diff=diff, source_ref=c.sha)
 
 
 def _source_branch(settings: Settings) -> _Source:
@@ -365,7 +407,8 @@ def _source_pr(settings: Settings, number: int, with_comments: bool) -> _Source:
     except github.GitHubError as exc:
         raise WorkflowError(str(exc)) from exc
     comments = [
-        ReviewComment(author=c.get("author") or "", body=c.get("body") or "", path=c.get("path"), line=c.get("line"), hunk=c.get("hunk") or "")
+        ReviewComment(author=c.get("author") or "", body=c.get("body") or "", path=c.get("path"), line=c.get("line"),
+                      hunk=c.get("hunk") or "", reply=bool(c.get("reply")), outdated=bool(c.get("outdated")))
         for c in raw_comments
     ]
     title = pr.get("title") or ""
@@ -395,15 +438,23 @@ def review(
         on_progress("reading the source")
     source = _build_source(settings, spec)
 
-    # Read DIFF_CHAR_LIMIT at call time so tests can lower it.
-    diff, omitted = truncate_diff(source.diff, DIFF_CHAR_LIMIT)
+    source_diff, excluded = _drop_excluded(source.diff)
+    if not source_diff.strip() and not source.comments:
+        raise WorkflowError(EMPTY_SOURCE_ERROR)
     notes: list[str] = []
+    # Read DIFF_CHAR_LIMIT at call time so tests can lower it.
+    diff, too_big = truncate_diff(source_diff, DIFF_CHAR_LIMIT, notes)
+    omitted = excluded + too_big
     omitted_set = set(omitted)
-    comments = [replace(c, file_omitted=True) if c.path in omitted_set else c for c in source.comments]
+    comments = [
+        # excluded files: drop the hunk too, it quotes the file's content
+        replace(c, file_omitted=True, hunk="" if c.path and _excluded_review_path(c.path) else c.hunk) if c.path in omitted_set else c
+        for c in source.comments
+    ]
     if len(comments) > COMMENT_LIMIT:
         notes.append(f"{len(comments) - COMMENT_LIMIT} later comments were not sent")
         comments = comments[:COMMENT_LIMIT]
-    if omitted and not _FILE_HEADER_RE.search(diff):
+    if too_big and not _FILE_HEADER_RE.search(diff):
         notes.append(ALL_FILES_OMITTED_NOTE)
 
     summary_text = repo_summary(settings, store) if store.file_count() > 0 else f"root: {settings.repo_root.name}"

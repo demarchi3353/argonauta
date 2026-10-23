@@ -433,6 +433,17 @@ def default_base_branch(repo_root: Path) -> str | None:
     return None
 
 
+def commit_parents(repo_root: Path, sha: str) -> list[str]:
+    """The parent SHAs of `sha` (`git rev-list --parents -n 1`)."""
+    out = run_git(repo_root, "rev-list", "--parents", "-n", "1", END, _ref(sha)).stdout.split()
+    return out[1:]
+
+
+def commit_diff_first_parent(repo_root: Path, sha: str) -> str:
+    """A merge commit as a plain diff against its first parent (`diff --git` headers, unlike `git show`)."""
+    return run_git(repo_root, "diff", "--no-ext-diff", END, f"{_ref(sha)}^1", sha).stdout
+
+
 def range_diff(repo_root: Path, base: str) -> str:
     """What HEAD adds since it forked from `base` (`git diff base...HEAD`)."""
     return run_git(repo_root, "diff", END, f"{_ref(base)}...HEAD").stdout
