@@ -81,7 +81,7 @@ h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacin
 /* explicit slots so a hidden aside does not shift the other columns */
 @media (min-width: 1024px) { .layout > .rail { grid-column: 1; } .layout > .side { grid-column: 2; } .layout > .center { grid-column: 3; } .layout > .inspector { grid-column: 4; } }
 .side, .center, .inspector { min-height: 0; overflow: auto; background: var(--bg-1); }
-.side { width: 240px; padding: 10px 12px; border-right: 1px solid var(--line); }
+.side { width: 280px; padding: 10px 12px; border-right: 1px solid var(--line); }
 .center { display: grid; grid-template-rows: 1fr auto; overflow: hidden; }
 #graph-area { display: grid; grid-template-rows: auto 1fr; min-height: 0; }
 .graph-scroll { min-height: 0; overflow: auto; }
@@ -115,6 +115,13 @@ h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacin
 .tree li.repo .btn.ghost { opacity: 0; }
 .tree li.repo:hover .btn.ghost, .tree li.repo:focus-within .btn.ghost, .tree li.repo.active .btn.ghost { opacity: 1; }
 .list li[aria-selected="true"], .tree li.active { background: var(--sel); }
+.side-filter { display: flex; flex: none; min-width: 0; max-width: none; margin: 0 0 8px; }
+.side-filter input { width: 100%; }
+#side-branches .list li { align-items: flex-start; }
+#side-branches .list li .name { white-space: normal; overflow-wrap: anywhere; }
+#side-branches .list li.group { cursor: default; margin-top: 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+#side-branches .list li.group:hover { background: none; }
+.count { font-weight: 400; color: var(--muted); font-size: 12px; }
 .list li .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 12px; }
 .badge { font-size: 11px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
 .files li { display: grid; grid-template-columns: auto auto 1fr auto; gap: 6px; align-items: center; padding: 2px 4px; border-radius: var(--radius); }

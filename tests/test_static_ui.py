@@ -225,3 +225,20 @@ def test_final_review_fixes():
     assert ".hist-status.manual" not in css and ".hist-status.unparsed" in css and ".sev.low" in css
     # 15: report.js is loaded before app.js
     assert html.index('src="/report.js"') < html.index('src="/app.js"') and "upstream default" not in js
+
+
+def test_branch_filter_and_grouping():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    js = (STATIC / "app.js").read_text(encoding="utf-8")
+    css = (STATIC / "app.css").read_text(encoding="utf-8")
+    side = html.split('id="side-branches"', 1)[1].split('id="center"', 1)[0]
+    assert '<input id="branch-filter" type="search" placeholder="Filter branches" aria-label="Filter branches"' in side
+    assert side.index('id="branch-filter"') < side.index('id="branch-list"')
+    assert 'id="branch-count"' in side and 'id="remote-count"' in side
+    assert '<script src="/branches.js"></script>' in html and html.index("/branches.js") < html.index("/app.js")
+    assert "<dt>b</dt><dd>Toggle the Branches panel" in html
+    assert "branchFilter: \"\"" in js and "ArgonautaBranches.groupBranches(" in js and "function renderBranches(" in js
+    assert "S.branchFilter = " in js and 'ev.key === "b"' in js
+    assert 'class="group" role="presentation"' in js and "data-remote-branch=" in js
+    assert "#side-branches .list li .name { white-space: normal; overflow-wrap: anywhere; }" in css
+    assert ".side { width: 280px;" in css

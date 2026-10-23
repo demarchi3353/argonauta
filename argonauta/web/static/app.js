@@ -12,7 +12,7 @@
 
   const S = {
     token: null, workspaces: [], workspaceId: null, repoId: null, stateSeq: 0, state: null, graph: [], proposals: [], events: [],
-    selection: null, openDiff: null, openReport: null, reportSeq: 0, detail: null, diffSeq: 0, graphScroll: 0, inspectorTab: "detail", bottomTab: "events", bottomOpen: false, sidePanel: null, terminals: new Map(), busy: new Set(), filter: "", pollTimer: null, changeCount: 0,
+    selection: null, openDiff: null, openReport: null, reportSeq: 0, detail: null, diffSeq: 0, graphScroll: 0, inspectorTab: "detail", bottomTab: "events", bottomOpen: false, sidePanel: null, terminals: new Map(), busy: new Set(), filter: "", branchFilter: "", pollTimer: null, changeCount: 0,
     reviews: [], prs: null, prsOrigin: null, prsError: null, ghStatus: null, ghStatusRepo: null, ghLoading: false, reviewSel: null, review: { source: "worktree", mode: "code", pr: null },
   };
 
@@ -195,14 +195,27 @@
   }
   async function refreshAll() { await refreshState(); await Promise.all([refreshGraph(), refreshAssistant()]); }
 
+  function renderBranches(st) {
+    const g = ArgonautaBranches.groupBranches(st.branches, st.remotes, S.branchFilter);
+    const q = S.branchFilter.trim();
+    const none = '<li class="muted">No branches match “' + esc(q) + '”.</li>';
+    const cnt = (shown, total) => "· " + (shown === total ? total : shown + " of " + total);
+    $("#branch-list").innerHTML = g.locals.map((b) => '<li role="option" tabindex="0" aria-selected="' + b.is_current + '" data-branch="' + esc(b.name) + '" title="' + (b.is_current ? "current branch" : "click to check out") + '">' + ic(b.is_current ? "i-check" : "i-branch") + '<span class="name">' + esc(b.name) + "</span>" +
+      (b.upstream ? '<span class="badge" title="ahead/behind upstream">' + b.ahead + "↑" + b.behind + "↓" + (b.gone ? " gone" : "") + "</span>" : "") +
+      (b.is_current ? "" : '<button class="btn mini ghost" data-del-branch="' + esc(b.name) + '" aria-label="Delete branch ' + esc(b.name) + '" title="Delete branch">' + ic("i-trash") + '</button>') + "</li>").join("") || (q ? none : '<li class="muted">No local branches yet.</li>');
+    $("#remote-branch-list").innerHTML = g.groups.map((grp) => '<li class="group" role="presentation">' + ic("i-cloud") + esc(grp.remote) + " · " + grp.branches.length + "</li>" +
+      grp.branches.map((b) => '<li role="option" tabindex="0" aria-selected="false" data-remote-branch="' + esc(b.name) + '" title="' + esc(b.name) + ' — click to check out a tracking branch">' + ic("i-branch") + '<span class="name">' + esc(b.short) + '</span><span class="badge">' + esc(b.sha) + "</span></li>").join("")).join("") ||
+      (q ? none : '<li class="muted">No remote branches (' + (st.remotes.length ? esc(st.remotes.map((r) => r.name).join(", ")) : "no remotes") + ").</li>");
+    $("#branch-count").textContent = cnt(g.localShown, g.localTotal);
+    $("#remote-count").textContent = cnt(g.remoteShown, g.remoteTotal);
+  }
   function renderState() {
     const st = S.state;
     $("#branch-pill").textContent = st ? (st.branch + (st.upstream ? " → " + st.upstream + " (" + st.ahead + "↑ " + st.behind + "↓)" : " (no upstream)")) : "no repository";
     renderRemoteButtons();
-    const bl = $("#branch-list"), rl = $("#remote-branch-list");
     const noRepoBox = $("#no-repo");
     if (!st) {
-      bl.innerHTML = ""; rl.innerHTML = ""; renderChanges(null); $("#store-missing").hidden = true; $("#assistant").hidden = true;
+      $("#branch-list").innerHTML = ""; $("#remote-branch-list").innerHTML = ""; $("#branch-count").textContent = ""; $("#remote-count").textContent = ""; renderChanges(null); $("#store-missing").hidden = true; $("#assistant").hidden = true;
       const ws = S.workspaces.find((w) => w.id === S.workspaceId);
       $("#no-repo-text").textContent = ws && !ws.repos.length ? 'Workspace “' + ws.name + '” has no repositories yet. Terminals, branches, commits and the assistant all belong to a repository.' : "No repository selected. Pick one in the repository switcher at the top.";
       noRepoBox.hidden = false; $("#graph-empty").hidden = true;
@@ -211,11 +224,7 @@
     }
     noRepoBox.hidden = true;
     setRepoControls(true, "");
-    const locals = st.branches.filter((b) => !b.remote), remotes = st.branches.filter((b) => b.remote);
-    bl.innerHTML = locals.map((b) => '<li role="option" tabindex="0" aria-selected="' + b.is_current + '" data-branch="' + esc(b.name) + '" title="' + (b.is_current ? "current branch" : "click to check out") + '">' + ic(b.is_current ? "i-check" : "i-branch") + '<span class="name">' + esc(b.name) + "</span>" +
-      (b.upstream ? '<span class="badge" title="ahead/behind upstream">' + b.ahead + "↑" + b.behind + "↓" + (b.gone ? " gone" : "") + "</span>" : "") +
-      (b.is_current ? "" : '<button class="btn mini ghost" data-del-branch="' + esc(b.name) + '" aria-label="Delete branch ' + esc(b.name) + '" title="Delete branch">' + ic("i-trash") + '</button>') + "</li>").join("") || '<li class="muted">No local branches yet.</li>';
-    rl.innerHTML = remotes.map((b) => '<li role="option" tabindex="0" aria-selected="false" data-remote-branch="' + esc(b.name) + '" title="click to check out a tracking branch">' + ic("i-cloud") + '<span class="name">' + esc(b.name) + '</span><span class="badge">' + esc(b.sha) + "</span></li>").join("") || '<li class="muted">No remote branches (' + (st.remotes.length ? esc(st.remotes.map((r) => r.name).join(", ")) : "no remotes") + ").</li>";
+    renderBranches(st);
     renderChanges(st.status);
     const store = st.store;
     $("#store-missing").hidden = store.initialized; $("#assistant").hidden = !store.initialized;
@@ -728,7 +737,7 @@
     const open = S.sidePanel !== name; S.sidePanel = open ? name : null;
     const panel = $("#side-" + name), btn = $('[data-rail="' + name + '"]');
     panel.hidden = !open; btn.setAttribute("aria-pressed", String(open));
-    if (open) { const f = panel.querySelector("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])"); if (f) f.focus(); }
+    if (open) { const f = name === "branches" ? $("#branch-filter") : panel.querySelector("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])"); if (f) f.focus(); }
     else btn.focus();
   }
   function onRail(ev) {
@@ -791,6 +800,12 @@
     });
     $("#branch-list").addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.target.dataset.branch) ev.target.click(); });
     $("#remote-branch-list").addEventListener("click", async (ev) => { const li = ev.target.closest("[data-remote-branch]"); if (!li) return; const name = li.dataset.remoteBranch.split("/").slice(1).join("/"); if (await dialog("Checkout remote branch", "Create local branch " + name + " tracking " + li.dataset.remoteBranch + "?", { ok: "Checkout" })) { try { await api("POST", rp("/branches"), { name, from: li.dataset.remoteBranch }); await api("POST", rp("/checkout"), { name }); toast("ok", "Checked out " + name); await refreshAll(); } catch (e) { toast("bad", e.message, true); } } });
+    $("#remote-branch-list").addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.target.dataset.remoteBranch) ev.target.click(); });
+    $("#branch-filter").addEventListener("input", (ev) => { S.branchFilter = ev.target.value; if (S.state) renderBranches(S.state); });
+    $("#branch-filter").addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape" && ev.target.value) { ev.preventDefault(); ev.stopPropagation(); ev.target.value = ""; S.branchFilter = ""; if (S.state) renderBranches(S.state); }
+      else if (ev.key === "Enter") { ev.preventDefault(); const row = $("#side-branches").querySelector('li[role="option"]'); if (row) row.focus(); }
+    });
     $("#btn-new-branch").addEventListener("click", newBranch);
     $("#btn-new-branch-2").addEventListener("click", newBranch);
     const changes = $("#pane-changes");
@@ -869,7 +884,7 @@
       const tag = (ev.target.tagName || "").toLowerCase(); if (["input", "textarea", "select"].includes(tag)) return;
       const num = ["1", "2", "3", "4", "5"].indexOf(ev.key); if (num >= 0) { ev.preventDefault(); if (ev.key === "4") showCredentials(); else selectTab("inspector", INSPECTOR_TABS[num]); return; }
       if (ev.key === "r") { ev.preventDefault(); selectTab("inspector", "review"); renderReviewTab(); const want = S.review.mode === "mine" ? $("#review-draft") : $("#btn-review-run"); const target = !want.disabled ? want : $("#pane-review").querySelector('button:not([disabled]):not([tabindex="-1"]), select:not([disabled]), textarea:not([disabled])'); if (target) target.focus(); return; }
-      if (ev.key === "p") { ev.preventDefault(); selectTab("inspector", "proposals"); $("#task").focus(); } if (ev.key === "c") { ev.preventDefault(); selectTab("inspector", "changes"); $("#commit-message").focus(); } if (ev.key === "t") { ev.preventDefault(); openTerminal(); } if (ev.key === "/") { ev.preventDefault(); $("#commit-filter").focus(); } if (ev.key === "?") { ev.preventDefault(); $("#help").showModal(); }
+      if (ev.key === "p") { ev.preventDefault(); selectTab("inspector", "proposals"); $("#task").focus(); } if (ev.key === "c") { ev.preventDefault(); selectTab("inspector", "changes"); $("#commit-message").focus(); } if (ev.key === "t") { ev.preventDefault(); openTerminal(); } if (ev.key === "/") { ev.preventDefault(); $("#commit-filter").focus(); } if (ev.key === "b") { ev.preventDefault(); toggleSidePanel("branches"); } if (ev.key === "?") { ev.preventDefault(); $("#help").showModal(); }
     });
     document.addEventListener("visibilitychange", () => { if (document.hidden) clearInterval(S.pollTimer); else startPolling(); });
   }

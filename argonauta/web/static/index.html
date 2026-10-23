@@ -77,9 +77,10 @@
   </nav>
 
   <aside id="side-branches" class="side" hidden aria-label="Branches">
-    <div class="box-head"><h2 id="h-branches" class="title">Branches</h2><button class="btn mini ghost" id="btn-new-branch" type="button"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Branch</button></div>
+    <div class="box-head"><h2 id="h-branches" class="title">Branches <span class="count" id="branch-count"></span></h2><button class="btn mini ghost" id="btn-new-branch" type="button"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Branch</button></div>
+    <label class="filter side-filter"><svg class="ic sm" aria-hidden="true"><use href="#i-search"/></svg><input id="branch-filter" type="search" placeholder="Filter branches" aria-label="Filter branches"></label>
     <ul id="branch-list" class="list" role="listbox" aria-label="Local branches"></ul>
-    <h3 class="label"><svg class="ic" aria-hidden="true"><use href="#i-cloud"/></svg>Remotes</h3>
+    <h3 class="label"><svg class="ic" aria-hidden="true"><use href="#i-cloud"/></svg>Remotes <span class="count" id="remote-count"></span></h3>
     <ul id="remote-branch-list" class="list" role="listbox" aria-label="Remote branches"></ul>
   </aside>
 
@@ -294,6 +295,7 @@
       <dt>c</dt><dd>Open Changes and focus the commit message</dd>
       <dt>t</dt><dd>Open a new terminal tab</dd>
       <dt>/</dt><dd>Filter commits</dd>
+      <dt>b</dt><dd>Toggle the Branches panel and focus its filter</dd>
       <dt>Esc</dt><dd>Close dialogs, the diff view, the review report, the branches panel and menus</dd>
       <dt>?</dt><dd>This help</dd>
     </dl>
@@ -305,6 +307,7 @@
 <script src="/vendor/addon-fit.js"></script>
 <script src="/patch.js"></script>
 <script src="/report.js"></script>
+<script src="/branches.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>
