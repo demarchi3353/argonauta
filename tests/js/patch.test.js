@@ -80,3 +80,7 @@ test("each chunk text is reconstructable to the original patch", () => {
   const all = MODIFIED + ADDED + DELETED;
   assert.equal(splitPatch(all).map((f) => f.text).join(""), all);
 });
+
+test("a merge commit with no textual changes yields no files", () => {
+  assert.deepEqual(splitPatch("commit message only, no diff --git lines\n"), []);
+});

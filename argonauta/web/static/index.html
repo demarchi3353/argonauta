@@ -82,14 +82,25 @@
   </aside>
 
   <section class="center" id="center" aria-label="Commit graph">
-    <div class="box-head sticky">
-      <h2><svg class="ic" aria-hidden="true"><use href="#i-commit"/></svg>Commits</h2>
-      <span id="graph-count" class="muted"></span>
+    <div id="graph-area">
+      <div class="box-head sticky">
+        <h2><svg class="ic" aria-hidden="true"><use href="#i-commit"/></svg>Commits</h2>
+        <span id="graph-count" class="muted"></span>
+      </div>
+      <div class="graph-scroll" id="graph-panel" tabindex="-1">
+        <div id="graph-empty" class="empty" hidden>No commits yet. Stage files and commit to start the graph.</div>
+        <div id="no-repo" class="empty hero" hidden><img class="logo-hero" src="/logo.png" alt="" width="96" height="96"><span id="no-repo-text">No repository selected.</span> <button class="btn mini" id="btn-add-repo-2" type="button"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Add a repository</button></div>
+        <div id="graph" class="graph" role="listbox" aria-label="Commits"></div>
+      </div>
     </div>
-    <div class="graph-scroll" id="graph-panel" tabindex="-1">
-      <div id="graph-empty" class="empty" hidden>No commits yet. Stage files and commit to start the graph.</div>
-      <div id="no-repo" class="empty hero" hidden><img class="logo-hero" src="/logo.png" alt="" width="96" height="96"><span id="no-repo-text">No repository selected.</span> <button class="btn mini" id="btn-add-repo-2" type="button"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Add a repository</button></div>
-      <div id="graph" class="graph" role="listbox" aria-label="Commits"></div>
+    <div id="diff-view" class="diff-view" hidden>
+      <div class="diff-head">
+        <button class="btn ghost" id="btn-diff-back" type="button" title="Back to the commit graph (Esc)">← Commits</button>
+        <span id="diff-title"></span>
+        <span id="diff-sub" class="muted"></span>
+        <span id="diff-actions"></span>
+      </div>
+      <div id="diff-body"></div>
     </div>
   <section class="bottom" id="bottom" aria-label="Terminals and events">
     <button class="strip" id="bottom-strip" type="button" aria-expanded="false" aria-controls="bottom-body"><svg class="ic" aria-hidden="true"><use href="#i-terminal"/></svg><span id="bottom-strip-label">Terminals (0) · Events</span></button>
@@ -111,7 +122,7 @@
       <button class="tab" role="tab" data-tab="credentials" aria-selected="false" id="tab-credentials" aria-controls="pane-credentials" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-key"/></svg>Credentials</button>
     </div>
     <div id="pane-detail" role="tabpanel" aria-labelledby="tab-detail" class="pane">
-      <div class="empty">Select a file, a commit or a proposal to see its diff.</div>
+      <div class="empty">Select a commit, a proposal or a file.</div>
     </div>
     <div id="pane-changes" role="tabpanel" aria-labelledby="tab-changes" class="pane" hidden>
       <div id="changes-empty" class="empty" hidden>Working tree is clean.</div>

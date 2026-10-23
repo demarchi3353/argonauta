@@ -90,3 +90,16 @@ def test_branches_side_panel():
     assert 'id="side-branches" class="side" hidden' in html and 'class="box"' not in side
     assert 'data-rail="branches" aria-label' in html and 'aria-pressed="true" data-rail="branches"' not in html
     assert "function toggleSidePanel" in js and "sidePanel: null" in js
+
+
+def test_diff_view_markup_and_handlers():
+    html = (STATIC / "index.html").read_text()
+    js = (STATIC / "app.js").read_text()
+    center = html.split('id="center"', 1)[1].split('class="inspector"', 1)[0]
+    for i in ("diff-view", "btn-diff-back", "diff-title", "diff-sub", "diff-actions", "diff-body"):
+        assert f'id="{i}"' in center, i
+    assert "ArgonautaPatch.splitPatch" in js
+    assert "function openDiffView" in js and "function closeDiffView" in js
+    # repo switch and discard close the view
+    assert js.count("closeDiffView()") >= 3
+    assert "No changes." in js
