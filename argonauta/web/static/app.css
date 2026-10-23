@@ -157,6 +157,7 @@ h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacin
 .diff .del { background: var(--del-bg); color: var(--del-text); }
 .diff .hunk { background: var(--hunk); color: var(--muted); }
 .diff .meta { color: var(--muted); font-weight: 600; }
+.diff .hit { background: color-mix(in srgb, var(--focus) 18%, transparent); box-shadow: inset 3px 0 0 var(--focus); }
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 8px 0; font-size: 13px; }
 .kv dt { color: var(--muted); } .kv dd { margin: 0; word-break: break-all; }
 .kv dd.mono { font-family: var(--font-mono); font-size: 12px; }
@@ -196,6 +197,7 @@ h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacin
 .verdict.agree, .verdict.sound { border-color: var(--ok); color: var(--ok); }
 .verdict.partly, .verdict.weak, .sev.medium { border-color: var(--warn); color: var(--warn); }
 .verdict.disagree, .verdict.wrong, .sev.high { border-color: var(--bad); color: var(--bad); }
+.sev.low { border-color: var(--muted); color: var(--muted); }
 .pill.warn { border-color: var(--warn); color: var(--warn); margin-top: 0; }
 .cfiles { list-style: none; margin: 6px 0; padding: 0; }
 .cfile { display: grid; grid-template-columns: 1.4em 1fr auto; gap: 6px; align-items: center; width: 100%; padding: 3px 4px; border: 0; border-radius: var(--radius); background: none; color: var(--text); cursor: pointer; text-align: left; font: inherit; }
@@ -307,4 +309,4 @@ h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacin
 .hist-row:hover { background: var(--bg-2); }
 .hist-row[aria-pressed="true"] { background: var(--sel); border-color: var(--line); }
 .hist-src { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hist-status.failed { color: var(--bad); } .hist-status.manual { color: var(--warn); }
+.hist-status.failed { color: var(--bad); } .hist-status.unparsed { color: var(--warn); }

@@ -182,6 +182,10 @@
     <div id="proposals-empty" class="empty" hidden>No proposals yet. Describe a change above.</div>
     </div>
     <div id="pane-review" role="tabpanel" aria-labelledby="tab-review" class="pane review-form" hidden>
+      <div id="review-store-missing" class="empty" hidden>
+        This repository has no Argonauta store yet; reviews are stored there.
+        <button class="btn" id="btn-review-init" type="button">Initialize the store first</button>
+      </div>
       <div class="label" id="review-source-label">Review what</div>
       <div id="review-source" class="seg-group" role="radiogroup" aria-labelledby="review-source-label">
         <button type="button" class="seg" role="radio" aria-checked="true" data-source="worktree">Working tree</button>
@@ -300,6 +304,7 @@
 <script src="/vendor/xterm.js"></script>
 <script src="/vendor/addon-fit.js"></script>
 <script src="/patch.js"></script>
+<script src="/report.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

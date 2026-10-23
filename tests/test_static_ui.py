@@ -191,7 +191,37 @@ def test_review_tab_keyboard_and_selection_polish():
 def test_review_acceptance_fixes():
     js = (STATIC / "app.js").read_text(encoding="utf-8")
     render = js.split("function renderReviewTab", 1)[1].split("\n  function ", 1)[0]
-    assert '"gh is not installed"' in render and "gh auth login" in render  # the PR option's title names the actual reason
+    gh_text = js.split("function ghText", 1)[1].split("\n  }", 1)[0]
+    assert "ghText(gh)" in render and '"gh is not installed"' in gh_text and "gh auth login" in gh_text  # the PR option's title names the actual reason
     readme = (STATIC.parent.parent.parent / "README.md").read_text(encoding="utf-8")
     gh_par = readme.split("Pull requests are read through", 1)[1].split("\n\n", 1)[0]
     assert "auth status" not in gh_par and "`api user`" in gh_par and "open pull requests" in gh_par
+
+
+def test_final_review_fixes():
+    js = (STATIC / "app.js").read_text(encoding="utf-8"); html = (STATIC / "index.html").read_text(encoding="utf-8")
+    css = (STATIC / "app.css").read_text(encoding="utf-8"); report = (STATIC / "report.js").read_text(encoding="utf-8")
+    # 3: the gh login is fetched by the page, not carried by /state; the PR refresh bypasses the cache
+    loader = js.split("async function loadGhStatus", 1)[1].split("\n  }", 1)[0]
+    assert '"/api/github/status"' in loader and '"?refresh=1"' in loader
+    assert "loadGhStatus(true)" in js and "loadGhStatus(false)" in js
+    # 5a: a finding opens its file at its line
+    assert 'row.classList.add("hit")' in js and 'scrollIntoView({ block: "center" })' in js and "REPORT.newLineIndex" in js
+    assert "data-rline" in report and "dataset.rline" in js and ".diff .hit" in css
+    # 5b: counts before the summary
+    assert "REPORT.summaryLine(review)" in js and "function countsLine" in report
+    # 7: a review blocks the assistant buttons and the other way round
+    busy = js.split("function setBusy", 1)[1].split("\n  }", 1)[0]
+    assert '"apply", "review"]' in busy
+    assert "othersBusy" in js.split("function renderReviewTab", 1)[1].split("\n  function ", 1)[0]
+    # 8: the store must exist first
+    assert 'id="review-store-missing"' in html and 'id="btn-review-init"' in html and "Initialize the store first" in html
+    # 9, 10: unparsed reviews warn and still show the stored notes
+    assert 'status === "unparsed") toast("warn"' in js
+    assert 'html = cards + \'<pre class="diff report-raw">\'' in js
+    # 11: the review error is shown inline
+    assert '"Reviewing", err)' in js
+    # 14: css
+    assert ".hist-status.manual" not in css and ".hist-status.unparsed" in css and ".sev.low" in css
+    # 15: report.js is loaded before app.js
+    assert html.index('src="/report.js"') < html.index('src="/app.js"') and "upstream default" not in js

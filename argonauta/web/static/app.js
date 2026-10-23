@@ -3,7 +3,8 @@
   "use strict";
   const $ = (sel, root) => (root || document).querySelector(sel);
   const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
-  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const REPORT = window.ArgonautaReport;
+  const esc = REPORT.esc;
   const LANES = ["--lane0", "--lane1", "--lane2", "--lane3", "--lane4", "--lane5"];
   const SIG = { good: "✓", bad: "✗", good_untrusted: "~", expired_signature: "⌛", expired_key: "⌛", revoked: "✗", unknown_key: "?", unsigned: "·" };
   const ic = (name) => '<svg class="ic" aria-hidden="true"><use href="#' + name + '"/></svg>';
@@ -12,7 +13,7 @@
   const S = {
     token: null, workspaces: [], workspaceId: null, repoId: null, stateSeq: 0, state: null, graph: [], proposals: [], events: [],
     selection: null, openDiff: null, openReport: null, reportSeq: 0, detail: null, diffSeq: 0, graphScroll: 0, inspectorTab: "detail", bottomTab: "events", bottomOpen: false, sidePanel: null, terminals: new Map(), busy: new Set(), filter: "", pollTimer: null, changeCount: 0,
-    reviews: [], prs: null, prsOrigin: null, prsError: null, reviewSel: null, review: { source: "worktree", mode: "code", pr: null },
+    reviews: [], prs: null, prsOrigin: null, prsError: null, ghStatus: null, ghStatusRepo: null, ghLoading: false, reviewSel: null, review: { source: "worktree", mode: "code", pr: null },
   };
 
   // ----- token and api -----------------------------------------------------------------
@@ -62,10 +63,10 @@
     if (on) S.busy.add(key); else S.busy.delete(key);
     const noRepo = !S.repoId;
     renderRemoteButtons();
-    const assistantBusy = ["index", "propose", "test", "apply"].some((k) => S.busy.has(k));
+    const assistantBusy = ["index", "propose", "test", "apply", "review"].some((k) => S.busy.has(k));
     ["propose", "index", "test"].forEach((k) => { const b = $("#btn-" + k); if (b) b.disabled = assistantBusy; });
     $("#btn-commit").disabled = S.busy.has("commit") || noRepo;
-    renderRail(); if (key === "review") renderReviewTab();
+    renderRail(); renderReviewTab(); // the run button follows every assistant job, not only reviews
   }
   function setRepoControls(enabled, reason) {
     REPO_BUTTONS.forEach((id) => { const b = $("#" + id); if (!b) return; b.disabled = !enabled; b.title = enabled ? "" : reason; });
@@ -73,7 +74,7 @@
   }
 
   // ----- jobs ------------------------------------------------------------------------------
-  async function runJob(kind, body, label) {
+  async function runJob(kind, body, label, errorEl) {
     setBusy(kind, true);
     const status = toastProgress(label || kind);
     try {
@@ -85,7 +86,7 @@
         status.update(job.progress || label || kind);
       }
       status.remove();
-      if (job.status === "failed") { toast("bad", (label || kind) + ": " + job.error, true); return null; }
+      if (job.status === "failed") { if (errorEl) errorEl.textContent = job.error; else toast("bad", (label || kind) + ": " + job.error, true); return null; } // errorEl: show it inline in the form
       return job.result;
     } catch (err) {
       status.remove();
@@ -295,6 +296,10 @@
     $("#diff-actions").innerHTML = spec.kind === "worktree" ? '<button class="btn" type="button" data-stage="' + esc(spec.path) + '">' + ic("i-plus") + "Stage</button>"
       : spec.kind === "index" ? '<button class="btn" type="button" data-unstage="' + esc(spec.path) + '">' + ic("i-undo") + "Unstage</button>" : "";
     const body = $("#diff-body"); body.innerHTML = diffHtml(spec.text); body.scrollTop = 0; body.scrollLeft = 0;
+    // a finding opens its file at its line (new side); a line outside the diff stays at the top
+    const hit = spec.kind === "review" && spec.line ? REPORT.newLineIndex(spec.text, spec.line) : -1;
+    const row = hit >= 0 ? $(".diff", body).children[hit] : null;
+    if (row) { row.classList.add("hit"); row.scrollIntoView({ block: "center" }); }
     $("#graph-area").hidden = true; $("#report-view").hidden = true; $("#diff-view").hidden = false;
     const back = $("#btn-diff-back"); back.textContent = S.openReport ? "← Review #" + S.openReport.rid : "← Commits"; back.title = S.openReport ? "Back to the review report (Esc)" : "Back to the commit graph (Esc)";
     // move focus into the view on open, and after a re-render dropped it (the Stage button is replaced)
@@ -330,7 +335,6 @@
 
   // ----- report view: a stored review replaces the graph in the centre ------------------------
   const MODE_LABELS = { code: "Code review", received: "Received review", mine: "My review" };
-  const VERDICTS = ["agree", "partly", "disagree", "sound", "weak", "wrong"], SEVERITIES = ["high", "medium", "low"];
   async function openReport(id) {
     const seq = ++S.reportSeq, repo = S.repoId;
     let review;
@@ -345,19 +349,6 @@
     $("#report-scroll").scrollTop = 0;
     $("#btn-report-back").focus({ preventScroll: true });
   }
-  function reportFileOmitted(review, path) {
-    return (review.omitted_files || []).includes(path) || (review.comments || []).some((c) => c && c.file_omitted && c.path === path);
-  }
-  function findingHtml(review, f) {
-    const verdict = f.kind === "verdict" && VERDICTS.includes(f.verdict) ? f.verdict : null, sev = !verdict && SEVERITIES.includes(f.severity) ? f.severity : null;
-    const badge = verdict ? '<span class="badge verdict ' + verdict + '">' + verdict.toUpperCase() + "</span>" : sev ? '<span class="badge sev ' + sev + '">' + sev.toUpperCase() + "</span>" : "";
-    const loc = f.path ? f.path + (f.line ? ":" + f.line : "") : "";
-    const where = f.path ? '<button type="button" class="finding-path" data-rpath="' + esc(f.path) + '" title="Open the diff of ' + esc(f.path) + '">' + esc(loc) + "</button>" : "";
-    const omitted = f.path && reportFileOmitted(review, f.path) ? '<span class="pill warn" title="This file was not in the diff sent to the model">File not sent</span>' : "";
-    const quote = f.quote ? '<blockquote class="finding-quote">' + (f.author ? '<cite>' + esc(f.author) + "</cite>" : "") + esc(f.quote) + "</blockquote>" : "";
-    return '<article class="finding' + (f.path ? " has-path" : "") + '"' + (f.path ? ' data-rpath="' + esc(f.path) + '"' : "") + '><div class="finding-head">' + badge + where + omitted + "</div>" + quote +
-      '<div class="title">' + esc(f.title) + "</div>" + (f.body ? '<p class="finding-body">' + esc(f.body) + "</p>" : "") + "</article>";
-  }
   function renderReport(review) {
     $("#report-title").textContent = "Review #" + review.id;
     const who = (review.provider || "") + (review.model ? "/" + review.model : "");
@@ -366,10 +357,11 @@
     const sum = $("#report-summary");
     sum.className = "report-summary" + (review.status === "ok" ? "" : " " + review.status);
     sum.textContent = review.status === "unparsed" ? "The model ignored the format; raw reply below"
-      : review.status === "failed" ? "The provider failed: " + (review.raw || "") : review.summary || "";
+      : review.status === "failed" ? "The provider failed: " + (review.raw || "") : REPORT.summaryLine(review);
+    const cards = (review.findings || []).map((f) => REPORT.findingHtml(review, f)).join("");
     let html = "";
-    if (review.status === "unparsed") html = '<pre class="diff report-raw">' + esc(review.raw || "") + "</pre>";
-    else if (review.status === "ok") html = (review.findings || []).length ? (review.findings || []).map((f) => findingHtml(review, f)).join("") : '<div class="empty">No findings.</div>';
+    if (review.status === "unparsed") html = cards + '<pre class="diff report-raw">' + esc(review.raw || "") + "</pre>"; // stored notes, then the raw reply
+    else if (review.status === "ok") html = cards || '<div class="empty">No findings.</div>';
     const om = review.omitted_files || [];
     if (om.length) html += '<p class="report-omitted">Not sent to the model: ' + om.map((p) => '<span class="mono">' + esc(p) + "</span>").join(", ") + "</p>";
     $("#report-body").innerHTML = html;
@@ -593,7 +585,15 @@
   }
 
   // ----- review tab ------------------------------------------------------------------------
-  function reviewSources() { const rs = S.state && S.state.store && S.state.store.review_sources; return rs || { branch_base: null, gh: { installed: false, logged_in: false, user: null, error: null } }; }
+  // /state carries only gh.installed (no network); the login comes from /api/github/status, fetched by loadGhStatus
+  function reviewSources() {
+    const rs = (S.state && S.state.store && S.state.store.review_sources) || { branch_base: null, gh: { installed: false } };
+    const installed = !!(rs.gh && rs.gh.installed), known = installed && S.ghStatus && S.ghStatusRepo === S.repoId ? S.ghStatus : null;
+    return { branch_base: rs.branch_base, gh: { installed, checked: !!known, logged_in: known ? known.logged_in : null, user: known ? known.user : null, error: known ? known.error : null } };
+  }
+  function ghText(gh) {
+    return !gh.installed ? "gh is not installed" : !gh.checked ? "checking the gh login…" : gh.logged_in ? "gh: logged in as " + (gh.user || "?") : gh.error || "gh is not logged in (run gh auth login)";
+  }
   function ghOk() { const g = reviewSources().gh; return !!(g && g.installed && g.logged_in); }
   function reviewModeOk(mode) { return mode !== "received" || (S.review.source === "pr" && !!S.review.pr); }
   // radiogroups: one tab stop (the checked option, else the first enabled one); arrows move and select
@@ -611,18 +611,19 @@
   }
   function renderReviewTab() {
     const rs = reviewSources(), gh = rs.gh || {}, st = S.state, R = S.review, hasRepo = !!(st && S.repoId);
+    if (S.inspectorTab === "review" && hasRepo && gh.installed && S.ghStatusRepo !== S.repoId && !S.ghLoading) loadGhStatus(false);
     const commit = S.selection && S.selection.type === "commit" ? S.selection.sha : null;
     const avail = { worktree: true, commit: !!commit, branch: !!rs.branch_base, pr: ghOk() };
     if (!avail[R.source]) R.source = "worktree";
     if (!reviewModeOk(R.mode)) R.mode = "code";
     $$("#review-source [data-source]").forEach((b) => { const s = b.dataset.source; b.disabled = !hasRepo || !avail[s]; b.setAttribute("aria-checked", String(R.source === s));
-      b.title = !avail[s] ? (s === "commit" ? "Select a commit in the graph first" : s === "branch" ? (rs.branch_base ? "" : "No base branch found") : gh.installed ? "gh is not logged in (run gh auth login)" : "gh is not installed") : ""; });
+      b.title = !avail[s] ? (s === "commit" ? "Select a commit in the graph first" : s === "branch" ? (rs.branch_base ? "" : "No base branch found") : ghText(gh)) : ""; });
     let note = "";
     if (R.source === "commit") { const c = S.graph.find((x) => x.sha === commit); note = commit ? (c ? c.short + " " + c.subject : commit.slice(0, 7)) : "Select a commit in the graph."; }
-    else if (R.source === "branch") note = rs.branch_base && st ? st.branch + " vs " + rs.branch_base : "No base branch (main, master or the upstream default) was found.";
+    else if (R.source === "branch") note = rs.branch_base && st ? st.branch + " vs " + rs.branch_base : "No base branch (main or master) was found.";
     else if (R.source === "pr") note = S.prsError || (S.prs && !S.prs.length ? "No open pull requests." : "");
     else note = "Uncommitted changes in the working tree.";
-    if (R.source !== "pr" && !ghOk()) note += (note ? " " : "") + "Pull requests: " + (gh.installed ? "log in with gh auth login" : "gh is not installed") + ".";
+    if (R.source !== "pr" && !ghOk()) note += (note ? " " : "") + "Pull requests: " + ghText(gh) + ".";
     $("#review-source-note").textContent = note;
     const prRow = $("#review-pr-row"), sel = $("#review-pr"); prRow.hidden = R.source !== "pr";
     if (S.prs) { const html = S.prs.map((p) => '<option value="' + esc(p.number) + '">#' + esc(p.number) + " " + esc(p.title) + " (" + esc(p.author) + ")</option>").join(""); if (sel.dataset.html !== html) { sel.innerHTML = html; sel.dataset.html = html; } if (!S.prs.some((p) => String(p.number) === String(R.pr))) R.pr = S.prs.length ? String(S.prs[0].number) : null; sel.value = R.pr || ""; }
@@ -632,10 +633,13 @@
     $$("#review-mode [data-mode]").forEach((b) => { const m = b.dataset.mode, ok = reviewModeOk(m); b.disabled = !hasRepo || !ok; b.setAttribute("aria-checked", String(R.mode === m)); b.title = ok ? "" : "Needs a pull request"; });
     rovingTabindex($("#review-source")); rovingTabindex($("#review-mode"));
     $("#review-draft-row").hidden = R.mode !== "mine";
-    $("#review-gh").textContent = !st ? "" : !gh.installed ? "gh: not installed" : !gh.logged_in ? "gh: not logged in (run gh auth login)" : "gh: logged in as " + (gh.user || "?") + (S.prsOrigin ? " · origin " + S.prsOrigin : "");
+    $("#review-gh").textContent = !st ? "" : !gh.installed ? "gh: not installed" : ghText(gh) + (gh.logged_in && S.prsOrigin ? " · origin " + S.prsOrigin : "");
     $("#review-run-label").textContent = R.mode === "code" ? "Review" : "Evaluate";
     const bad = (R.source === "commit" && !commit) || (R.source === "pr" && !R.pr);
-    const run = $("#btn-review-run"); run.disabled = !hasRepo || S.busy.has("review") || bad; if (!hasRepo) run.title = "Select or add a repository first"; else run.title = bad ? "Choose what to review first" : "";
+    const noStore = hasRepo && !st.store.initialized, othersBusy = ["index", "propose", "test", "apply"].some((k) => S.busy.has(k));
+    $("#review-store-missing").hidden = !noStore;
+    const run = $("#btn-review-run"); run.disabled = !hasRepo || noStore || S.busy.has("review") || othersBusy || bad;
+    run.title = !hasRepo ? "Select or add a repository first" : noStore ? "Initialize the store first" : othersBusy ? "Another assistant job is running" : bad ? "Choose what to review first" : "";
     renderReviewHistory();
   }
   function renderReviewHistory() {
@@ -649,6 +653,16 @@
     const seq = S.stateSeq;
     try { const r = (await api("GET", rp("/reviews?limit=50"))).reviews; if (seq !== S.stateSeq) return; S.reviews = r; } catch (err) { if (seq !== S.stateSeq) return; S.reviews = []; }
     renderReviewTab();
+  }
+  async function loadGhStatus(refresh) {
+    const repo = S.repoId; if (!repo || (S.ghLoading && !refresh)) return;
+    S.ghLoading = true;
+    let status;
+    try { status = await api("GET", "/api/github/status" + (refresh ? "?refresh=1" : "")); }
+    catch (err) { status = { installed: true, logged_in: null, user: null, error: "could not check gh: " + err.message }; }
+    finally { S.ghLoading = false; }
+    if (repo !== S.repoId) return;
+    S.ghStatus = status; S.ghStatusRepo = repo; renderReviewTab();
   }
   async function loadPrs() {
     if (!S.repoId) return;
@@ -670,10 +684,11 @@
     if ((R.source === "commit" || R.source === "pr") && !ref) { err.textContent = "Choose what to review first."; return; }
     const draft = R.mode === "mine" ? $("#review-draft").value : "";
     if (R.mode === "mine" && !draft.trim()) { err.textContent = "Paste your draft review first."; $("#review-draft").focus(); return; }
-    const res = await runJob("review", { mode: R.mode, source: { kind: R.source, ref }, draft }, "Reviewing");
+    const res = await runJob("review", { mode: R.mode, source: { kind: R.source, ref }, draft }, "Reviewing", err);
     await refreshReviews();
     if (!res) return;
     if (res.manual) { toast("warn", res.message || "Manual mode: no review was produced.", true); return; }
+    if (res.review && res.review.status === "unparsed") toast("warn", "Review #" + res.review.id + ": the model ignored the format; the raw reply is shown.", true);
     if (res.review) selectReview(res.review.id);
   }
 
@@ -684,6 +699,7 @@
       S.inspectorTab = name;
       $$("#inspector-tabs .tab").forEach((t) => { const on = t.dataset.tab === name; t.setAttribute("aria-selected", String(on)); t.tabIndex = on ? 0 : -1; });
       INSPECTOR_TABS.forEach((n) => { $("#pane-" + n).hidden = n !== name; });
+      if (name === "review") renderReviewTab(); // first visit per repository fetches the gh login
       $$("#rail [data-rail]").forEach((b) => { if (INSPECTOR_TABS.includes(b.dataset.rail)) b.setAttribute("aria-pressed", String(b.dataset.rail === name)); });
     } else {
       S.bottomTab = name;
@@ -812,7 +828,8 @@
     $("#review-mode").addEventListener("click", (ev) => { const b = ev.target.closest("[data-mode]"); if (!b || b.disabled) return; S.review.mode = b.dataset.mode; renderReviewTab(); });
     $("#review-source").addEventListener("keydown", radioKeys); $("#review-mode").addEventListener("keydown", radioKeys);
     $("#review-pr").addEventListener("change", (ev) => { S.review.pr = ev.target.value || null; renderReviewTab(); });
-    $("#btn-review-prs").addEventListener("click", () => loadPrs());
+    $("#btn-review-prs").addEventListener("click", async () => { await loadGhStatus(true); if (ghOk()) loadPrs(); else { S.prs = null; renderReviewTab(); } });
+    $("#btn-review-init").addEventListener("click", () => { selectTab("inspector", "proposals"); $("#btn-init").focus(); });
     $("#btn-review-run").addEventListener("click", runReview);
     $("#review-history").addEventListener("click", (ev) => { const b = ev.target.closest("[data-review]"); if (b) selectReview(Number(b.dataset.review)); });
     $("#proposals-table").addEventListener("click", (ev) => { const tr = ev.target.closest("[data-prop]"); if (tr) showProposal(Number(tr.dataset.prop)); });
@@ -834,7 +851,8 @@
     $("#report-body").addEventListener("click", (ev) => {
       const card = ev.target.closest("[data-rpath]"); if (!card || !S.openReport) return;
       if (!ev.target.closest("button") && !window.getSelection().isCollapsed) return; // selecting text in a card is not a click
-      openDiffView({ kind: "review", rid: S.openReport.rid, path: card.dataset.rpath, status: "" });
+      const art = card.closest(".finding"), line = art && art.dataset.rline ? Number(art.dataset.rline) : null;
+      openDiffView({ kind: "review", rid: S.openReport.rid, path: card.dataset.rpath, status: "", line });
     });
     $("#diff-actions").addEventListener("click", async (ev) => {
       const b = ev.target.closest("[data-stage], [data-unstage]"); if (!b) return;

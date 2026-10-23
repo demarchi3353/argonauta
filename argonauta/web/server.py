@@ -29,6 +29,7 @@ STATIC_FILES = {
     "/index.html": ("index.html", "text/html; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/patch.js": ("patch.js", "text/javascript; charset=utf-8"),
+    "/report.js": ("report.js", "text/javascript; charset=utf-8"),
     "/app.css": ("app.css", "text/css; charset=utf-8"),
     "/vendor/xterm.js": ("vendor/xterm.js", "text/javascript; charset=utf-8"),
     "/vendor/xterm.css": ("vendor/xterm.css", "text/css; charset=utf-8"),
