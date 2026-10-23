@@ -105,3 +105,13 @@ def test_diff_view_markup_and_handlers():
     assert "No changes." in js
     # a clean merge has an empty patch but still lists its files
     assert "&& !(stats && stats.length)) return" in js
+
+
+def test_copy_and_help_updated():
+    html = (STATIC / "index.html").read_text()
+    js = (STATIC / "app.js").read_text()
+    readme = (STATIC.parent.parent.parent / "README.md").read_text()
+    assert "sidebar" not in js and "sidebar" not in html.lower().split("<dialog", 1)[0]
+    assert "<dt>1–4</dt>" in html or "<dt>1-4</dt>" in html
+    assert 'class="logo-hero" src="/logo.png" alt="" width="96" height="96"' in html
+    assert "inspector" in readme.lower() and "rail" in readme.lower()

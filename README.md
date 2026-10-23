@@ -92,22 +92,39 @@ when it is not running.
 ### Layout
 
 ```
-┌ workspace ▾ · repository ▾ · branch pill · Fetch Pull Push · Terminal Credentials ? ┐
-├ left ─────────┬ centre ──────────────────────┬ right ───────────────────────────────┤
-│ Workspaces    │ Commits: graph with lanes,   │ Detail: diff of the selected file,  │
-│ Branches      │ refs, signature badge, sha;  │ commit or proposal                  │
-│ Remotes       │ filter box                   │ Credentials: identity, SSH, signing │
-│ Changes       │                              │                                      │
-│  staged /     │                              │                                      │
-│  unstaged     │                              │                                      │
-│  commit box   │                              │                                      │
-├ bottom ───────┴──────────────────────────────┴──────────────────────────────────────┤
-│ tabs: Proposals · Events · one tab per open terminal                                │
-└─────────────────────────────────────────────────────────────────────────────────────┘
+┌ logo · repository ▾ · branch · filter · Fetch Pull Push · ? ──────────────────────┐
+├──────┬──────────┬─────────────────────────────────────┬────────────────────────────┤
+│ rail │ branches │ centre: commit graph, or a file     │ inspector tabs:            │
+│      │ panel    │ diff (Back / Esc returns)           │ Detail · Changes ·         │
+│      │ (toggled │                                     │ Proposals · Credentials    │
+│      │ from the ├─────────────────────────────────────┤                            │
+│      │ rail)    │ bottom panel: terminals · events    │                            │
+└──────┴──────────┴─────────────────────────────────────┴────────────────────────────┘
 ```
 
-Every control has an icon and a text label; the icons are an inline SVG sprite
-shipped with the page.
+- **Topbar**: the logo, the repository switcher (a popover that lists
+  workspaces and repositories), the current branch, the commit filter, Fetch /
+  Pull / Push and the help button.
+- **Rail**: a 44px column of icon buttons on the left. Repositories opens the
+  switcher, Branches toggles the branches panel, Changes and Proposals open
+  those inspector tabs, Terminal opens a new terminal, Events opens the event
+  log in the bottom panel, Model opens the model sheet and Credentials opens
+  that inspector tab.
+- **Branches panel**: local branches with ahead/behind counts and remote
+  branches, next to the graph; it only takes space while you have it open.
+- **Centre**: the commit graph. Opening a file from Changes, or from a commit
+  or proposal, shows its diff in the centre instead of the graph, as GitKraken
+  does; the Back button or `Esc` returns to the graph.
+- **Inspector**: tabs for Detail (the selected commit or proposal), Changes
+  (staged and unstaged files and the commit box), Proposals (the assistant)
+  and Credentials.
+- **Bottom panel**: terminals and the Events log, under the graph. It
+  collapses to a strip.
+
+Every control has an icon and a text label or tooltip; the icons are an inline
+SVG sprite shipped with the page. The fonts (IBM Plex Sans and JetBrains Mono,
+SIL OFL) are vendored under `vendor/fonts`, so the page loads nothing from the
+network.
 
 ### Workspaces and repositories
 
@@ -200,13 +217,13 @@ The panel reads `git config`, `ssh -G`, `ssh-keygen -l` on `.pub` files,
 
 ### Assistant
 
-The bottom "Proposals" tab is the assistant. A repository without a store
+The "Proposals" tab in the inspector is the assistant. A repository without a store
 shows an "Initialize" button (optionally with the test command). Then
 "Index" scans the files, the task field plus "Propose" asks the provider for a
-diff ("Dry run" only shows which files would be sent), and a proposal opens on
-the right with its explanation and diff and the actions Apply (with "run
+diff ("Dry run" only shows which files would be sent), and a proposal opens in
+the Detail tab with its explanation and diff and the actions Apply (with "run
 tests" and "commit on green" checkboxes), Reject, Commit and Revert. "Run
-tests" runs the configured command on demand. The "Events" tab is the audit
+tests" runs the configured command on demand. The Events panel is the audit
 log: every git action taken from the page and every assistant step is recorded
 there and in `argonauta history --events`.
 
@@ -215,8 +232,9 @@ background with a progress toast; one runs at a time per repository.
 
 ### Keyboard and states
 
-Shortcuts: `p` proposal field, `c` commit message, `t` new terminal, `/`
-filter commits, `?` help, `Esc` closes dialogs. Every control is reachable with
+Shortcuts: `1`–`4` inspector tabs (Detail, Changes, Proposals, Credentials),
+`p` proposal field, `c` commit message, `t` new terminal, `/` filter commits,
+`?` help, `Esc` closes dialogs, the diff view, the branches panel and menus. Every control is reachable with
 Tab and has a visible focus ring; arrows move through the commit list and
 Enter opens the focused item. Status is always shown with a symbol and text,
 never colour alone. The theme follows your OS.
@@ -357,7 +375,7 @@ and points at `pip install 'argonauta[anthropic]'`.
   and branch switches use `git switch`, which cannot touch files.
 - **Network**: the page talks only to the loopback server that `argonauta ui`
   started, authenticated with a per-run token, and loads no external script,
-  font or image. Fetch, pull and push talk to your remotes with your own
+  font or image (the fonts are vendored). Fetch, pull and push talk to your remotes with your own
   credentials. The model request goes to the Anthropic API or to the local
   model URL, and only when a provider is configured and you propose without
   "Dry run" or `--from-diff`; it contains the system prompt, your task text, a
@@ -406,7 +424,7 @@ argonauta/
     terminal.py          pty sessions: spawn, resize, read/write, non-blocking shutdown
     credentials.py       read-only SSH / GPG / identity inspection
     graph.py             lane assignment for the commit graph
-    static/              index.html, app.js, app.css and vendor/ (xterm.js, MIT)
+    static/              index.html, app.js, app.css and vendor/ (xterm.js, MIT; fonts, OFL)
 ```
 
 The web layer only orchestrates: every git action goes through `gitops.py`,
