@@ -38,3 +38,15 @@ def test_css_declares_slate_tokens_in_both_schemes():
     assert "var(--font-mono)" not in css.split("--font-mono:", 1)[1].split(";", 1)[0]
     assert "--sel: rgba(34,197,94,.12)" in css and "--sel: rgba(22,163,74,.12)" in css
     assert "prefers-reduced-motion: reduce" in css
+
+
+def test_topbar_structure():
+    html = (STATIC / "index.html").read_text()
+    assert 'id="repo-switch"' in html and 'aria-haspopup="menu"' in html
+    assert 'id="repo-menu"' in html and 'id="workspace-list"' in html
+    assert 'id="workspace-select"' not in html and 'id="repo-select"' not in html
+    assert 'class="logo" src="/logo.png" alt="" width="34" height="34"' in html
+    assert 'id="btn-help"' in html and 'aria-label="Help"' in html
+    # the filter lives in the topbar, between the brand and the git actions
+    top = html.split('<header', 1)[1].split('</header>', 1)[0]
+    assert 'id="commit-filter"' in top and 'id="btn-push"' in top

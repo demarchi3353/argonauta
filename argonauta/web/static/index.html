@@ -39,32 +39,27 @@
 </svg>
 <a class="skip" href="#graph-panel">Skip to commit graph</a>
 <header class="topbar" role="banner">
-  <div class="brand"><img class="logo" src="/logo.png" alt="" width="28" height="28">Argonauta</div>
-  <label class="field"><span>Workspace</span><select id="workspace-select" aria-label="Workspace"></select></label>
-  <label class="field"><span>Repository</span><select id="repo-select" aria-label="Repository"></select></label>
+  <div class="brand" id="brand"><img class="logo" src="/logo.png" alt="" width="34" height="34">Argonauta</div>
+  <button id="repo-switch" class="btn switcher" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="repo-menu" title="Switch repository"><svg class="ic" aria-hidden="true"><use href="#i-repo"/></svg><span id="repo-switch-label">No repository</span><svg class="ic xs" aria-hidden="true" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
   <div class="branch-pill" id="branch-pill" aria-live="polite" title="Current branch"></div>
-  <div class="spacer"></div>
+  <label class="filter"><svg class="ic sm" aria-hidden="true"><use href="#i-search"/></svg><input id="commit-filter" type="search" placeholder="Filter commits" aria-label="Filter commits"><kbd>/</kbd></label>
   <div class="actions" role="group" aria-label="Remote actions">
     <button id="btn-fetch" class="btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-fetch"/></svg>Fetch</button>
     <button id="btn-pull" class="btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-pull"/></svg>Pull</button>
     <button id="btn-push" class="btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-push"/></svg>Push</button>
   </div>
-  <div class="actions" role="group" aria-label="Panels">
-    <button id="btn-terminal" class="btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-terminal"/></svg>Terminal</button>
-    <button id="btn-credentials" class="btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-key"/></svg>Credentials</button>
-    <button id="btn-model" class="btn" type="button" title="Which model the assistant uses"><svg class="ic" aria-hidden="true"><use href="#i-cpu"/></svg>Model</button>
-    <button id="btn-help" class="btn ghost" type="button" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)"><svg class="ic" aria-hidden="true"><use href="#i-help"/></svg></button>
-  </div>
+  <button id="btn-help" class="btn icon ghost" type="button" aria-label="Help" title="Keyboard shortcuts (?)"><svg class="ic" aria-hidden="true"><use href="#i-help"/></svg></button>
 </header>
+<dialog id="repo-menu" class="menu" aria-label="Repositories">
+  <div class="menu-head">
+    <button class="btn mini" id="btn-add-workspace" type="button"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Workspace</button>
+    <button class="btn mini" id="btn-add-repo" type="button"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Repo</button>
+  </div>
+  <ul id="workspace-list" class="tree" role="menu" aria-label="Workspaces and repositories"></ul>
+</dialog>
 
 <main class="layout">
   <aside class="left" aria-label="Repository sidebar">
-    <section class="box" aria-labelledby="h-workspaces">
-      <div class="box-head"><h2 id="h-workspaces">Workspaces</h2>
-        <button class="btn mini" id="btn-add-workspace" type="button"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Workspace</button>
-        <button class="btn mini" id="btn-add-repo" type="button"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Repo</button></div>
-      <ul id="workspace-list" class="tree" role="tree" aria-label="Workspaces and repositories"></ul>
-    </section>
     <section class="box" aria-labelledby="h-branches">
       <div class="box-head"><h2 id="h-branches">Branches</h2><button class="btn mini" id="btn-new-branch" type="button"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Branch</button></div>
       <ul id="branch-list" class="list" role="listbox" aria-label="Local branches"></ul>
@@ -94,7 +89,6 @@
   <section class="center" id="graph-panel" aria-label="Commit graph" tabindex="-1">
     <div class="box-head sticky">
       <h2><svg class="ic" aria-hidden="true"><use href="#i-commit"/></svg>Commits</h2>
-      <input id="commit-filter" type="search" placeholder="Filter commits (/)" aria-label="Filter commits">
       <span id="graph-count" class="muted"></span>
     </div>
     <div id="graph-empty" class="empty" hidden>No commits yet. Stage files and commit to start the graph.</div>

@@ -7,7 +7,7 @@
   const LANES = ["--lane0", "--lane1", "--lane2", "--lane3", "--lane4", "--lane5"];
   const SIG = { good: "✓", bad: "✗", good_untrusted: "~", expired_signature: "⌛", expired_key: "⌛", revoked: "✗", unknown_key: "?", unsigned: "·" };
   const ic = (name) => '<svg class="ic" aria-hidden="true"><use href="#' + name + '"/></svg>';
-  const REPO_BUTTONS = ["btn-fetch", "btn-pull", "btn-push", "btn-terminal", "btn-credentials", "btn-new-branch", "btn-stage-all", "btn-unstage-all", "btn-commit"];
+  const REPO_BUTTONS = ["btn-fetch", "btn-pull", "btn-push", "btn-new-branch", "btn-stage-all", "btn-unstage-all", "btn-commit"];
 
   const S = {
     token: null, workspaces: [], workspaceId: null, repoId: null, stateSeq: 0, state: null, graph: [], proposals: [], events: [],
@@ -52,11 +52,15 @@
       if (opts.input) input.focus(); else $("#dialog-ok").focus();  // Enter confirms; Esc cancels
     });
   }
+  function renderRemoteButtons() {
+    const anyRemote = ["fetch", "pull", "push"].some((k) => S.busy.has(k)), ahead = S.state ? S.state.ahead : 0;
+    ["fetch", "pull", "push"].forEach((k) => { const b = $("#btn-" + k); b.disabled = anyRemote || !S.repoId; b.innerHTML = (S.busy.has(k) ? '<span class="spinner"></span>' : ic("i-" + k)) + (k === "push" && ahead > 0 ? "Push " + ahead + "↑" : k[0].toUpperCase() + k.slice(1)); });
+    $("#btn-push").classList.toggle("primary", ahead > 0);
+  }
   function setBusy(key, on) {
     if (on) S.busy.add(key); else S.busy.delete(key);
     const noRepo = !S.repoId;
-    const anyRemote = ["fetch", "pull", "push"].some((k) => S.busy.has(k));
-    ["fetch", "pull", "push"].forEach((k) => { const b = $("#btn-" + k); b.disabled = anyRemote || noRepo; b.innerHTML = (S.busy.has(k) ? '<span class="spinner"></span>' : ic("i-" + k)) + k[0].toUpperCase() + k.slice(1); });
+    renderRemoteButtons();
     const assistantBusy = ["index", "propose", "test", "apply"].some((k) => S.busy.has(k));
     ["propose", "index", "test"].forEach((k) => { const b = $("#btn-" + k); if (b) b.disabled = assistantBusy; });
     $("#btn-commit").disabled = S.busy.has("commit") || noRepo;
@@ -107,27 +111,45 @@
     renderWorkspaces();
   }
   function renderWorkspaces() {
-    const wsSel = $("#workspace-select"), repoSel = $("#repo-select"), tree = $("#workspace-list");
-    wsSel.innerHTML = S.workspaces.map((w) => '<option value="' + esc(w.id) + '">' + esc(w.name) + "</option>").join("");
+    const tree = $("#workspace-list");
     const current = S.workspaces.find((w) => w.id === S.workspaceId) || S.workspaces.find((w) => w.repos.some((r) => r.id === S.repoId)) || S.workspaces[0];
-    if (current) { wsSel.value = current.id; S.workspaceId = current.id; }
-    repoSel.innerHTML = (current ? current.repos : []).map((r) => '<option value="' + esc(r.id) + '"' + (r.exists ? "" : " disabled") + ">" + esc(r.name) + (r.exists ? "" : " (missing)") + "</option>").join("");
-    if (S.repoId) repoSel.value = S.repoId;
-    tree.innerHTML = S.workspaces.map((w) => '<li class="ws" role="treeitem" aria-expanded="true">' + ic("i-folder") + esc(w.name) + ' <button class="btn mini ghost" data-del-ws="' + esc(w.id) + '" aria-label="Remove workspace ' + esc(w.name) + '" title="Remove workspace">' + ic("i-x") + '</button></li>' +
-      (w.repos.length ? "" : '<li class="repo muted" role="treeitem"><em>empty: use “+ Repo” to add a repository</em></li>') +
-      w.repos.filter((r) => !r.parent_id).map((r) => '<li class="repo' + (r.id === S.repoId ? " active" : "") + (r.exists ? "" : " missing") + '" role="treeitem" tabindex="0" data-repo="' + esc(r.id) + '" title="' + esc(r.path) + '">' + ic("i-repo") + esc(r.name) + (r.exists ? "" : " (missing)") +
+    if (current) S.workspaceId = current.id;
+    const cur = current && current.repos.find((r) => r.id === S.repoId);
+    $("#repo-switch-label").innerHTML = current ? '<span class="muted">' + esc(current.name) + "</span> / " + (cur ? esc(cur.name) : '<span class="muted">no repository</span>') : "No repository";
+    tree.innerHTML = S.workspaces.map((w) => '<li class="ws" role="presentation">' + ic("i-folder") + esc(w.name) + ' <button class="btn mini ghost" data-del-ws="' + esc(w.id) + '" aria-label="Remove workspace ' + esc(w.name) + '" title="Remove workspace">' + ic("i-x") + '</button></li>' +
+      (w.repos.length ? "" : '<li class="repo muted" role="none"><em>empty: use “+ Repo” to add a repository</em></li>') +
+      w.repos.filter((r) => !r.parent_id).map((r) => '<li class="repo' + (r.id === S.repoId ? " active" : "") + (r.exists ? "" : " missing") + '" role="menuitem" tabindex="0" data-repo="' + esc(r.id) + '" title="' + esc(r.path) + '">' + ic("i-repo") + esc(r.name) + (r.exists ? "" : " (missing)") +
         ' <button class="btn mini ghost" data-add-wt="' + esc(r.id) + '" aria-label="New worktree of ' + esc(r.name) + '" title="New worktree: a separate checkout with its own terminal">' + ic("i-plus") + ic("i-worktree") + '</button>' +
         '<button class="btn mini ghost" data-del-repo="' + esc(r.id) + '" data-ws="' + esc(w.id) + '" aria-label="Remove repository ' + esc(r.name) + '" title="Remove from workspace">' + ic("i-x") + '</button></li>' +
-        w.repos.filter((c) => c.parent_id === r.id).map((c) => '<li class="repo wt' + (c.id === S.repoId ? " active" : "") + (c.exists ? "" : " missing") + '" role="treeitem" tabindex="0" data-repo="' + esc(c.id) + '" title="Worktree at ' + esc(c.path) + '">' + ic("i-worktree") + esc(c.name) + (c.exists ? "" : " (missing)") +
+        w.repos.filter((c) => c.parent_id === r.id).map((c) => '<li class="repo wt' + (c.id === S.repoId ? " active" : "") + (c.exists ? "" : " missing") + '" role="menuitem" tabindex="0" data-repo="' + esc(c.id) + '" title="Worktree at ' + esc(c.path) + '">' + ic("i-worktree") + esc(c.name) + (c.exists ? "" : " (missing)") +
           ' <button class="btn mini ghost" data-del-wt="' + esc(c.name) + '" data-main="' + esc(r.id) + '" aria-label="Remove worktree ' + esc(c.name) + '" title="Remove worktree (the branch is kept)">' + ic("i-trash") + '</button></li>').join("")).join("")).join("");
-    if (!S.workspaces.length) tree.innerHTML = '<li class="empty">No workspaces. Click “+ Workspace”, then “+ Repo”.</li>';
+    if (!S.workspaces.length) tree.innerHTML = '<li class="empty">No workspaces. Use “+ Workspace”, then “+ Repo”.</li>';
   }
   async function selectRepo(id) {
     S.repoId = id; S.selection = null; S.graph = []; S.proposals = []; S.stateSeq++;
     const owner = S.workspaces.find((w) => w.repos.some((r) => r.id === id)); if (owner) S.workspaceId = owner.id;
     try { localStorage.setItem("argonauta.repo", id); } catch (e) { /* ignore */ }
     renderWorkspaces(); renderDetail();
+    if ($("#repo-menu").open) closeRepoMenu();
     await refreshAll();
+  }
+  // the switcher popover: a non-modal dialog under its trigger; Escape, an outside click or a pick closes it
+  let menuAnchor = null;
+  function onMenuKey(ev) { if (ev.key === "Escape" && !document.querySelector("dialog[open]:not(#repo-menu)")) { ev.preventDefault(); closeRepoMenu(); } }
+  function onMenuClick(ev) { if (!ev.target.closest("#repo-menu, #repo-switch, dialog")) closeRepoMenu(); }
+  function openRepoMenu(anchorEl) {
+    const m = $("#repo-menu"), r = anchorEl.getBoundingClientRect();
+    menuAnchor = anchorEl; renderWorkspaces();
+    m.style.left = r.left + "px"; m.style.top = r.bottom + 4 + "px";
+    if (!m.open) m.show();
+    anchorEl.setAttribute("aria-expanded", "true");
+    document.addEventListener("keydown", onMenuKey); document.addEventListener("click", onMenuClick);
+    const first = m.querySelector(".repo.active") || m.querySelector("[data-repo]"); if (first) first.focus();
+  }
+  function closeRepoMenu() {
+    const m = $("#repo-menu"); if (m.open) m.close();
+    document.removeEventListener("keydown", onMenuKey); document.removeEventListener("click", onMenuClick);
+    if (menuAnchor) { menuAnchor.setAttribute("aria-expanded", "false"); menuAnchor.focus(); menuAnchor = null; }
   }
 
   // ----- state and graph -------------------------------------------------------------------
@@ -158,12 +180,13 @@
   function renderState() {
     const st = S.state;
     $("#branch-pill").textContent = st ? (st.branch + (st.upstream ? " → " + st.upstream + " (" + st.ahead + "↑ " + st.behind + "↓)" : " (no upstream)")) : "no repository";
+    renderRemoteButtons();
     const bl = $("#branch-list"), rl = $("#remote-branch-list");
     const noRepoBox = $("#no-repo");
     if (!st) {
       bl.innerHTML = ""; rl.innerHTML = ""; renderChanges(null); $("#store-missing").hidden = true; $("#assistant").hidden = true;
-      const ws = S.workspaces.find((w) => w.id === $("#workspace-select").value);
-      $("#no-repo-text").textContent = ws && !ws.repos.length ? 'Workspace “' + ws.name + '” has no repositories yet. Terminals, branches, commits and the assistant all belong to a repository.' : "No repository selected. Pick one in the sidebar.";
+      const ws = S.workspaces.find((w) => w.id === S.workspaceId);
+      $("#no-repo-text").textContent = ws && !ws.repos.length ? 'Workspace “' + ws.name + '” has no repositories yet. Terminals, branches, commits and the assistant all belong to a repository.' : "No repository selected. Pick one in the repository switcher at the top.";
       noRepoBox.hidden = false; $("#graph-empty").hidden = true;
       setRepoControls(false, "Select or add a repository first");
       return;
@@ -326,7 +349,7 @@
     return { background: v("--bg-0"), foreground: v("--text"), cursor: v("--accent"), selectionBackground: v("--bg-3") };
   }
   async function openTerminal() {
-    if (!S.repoId) { toast("warn", "Terminals belong to a repository: select one in the sidebar, or add one to this workspace with “+ Repo”."); return; }
+    if (!S.repoId) { toast("warn", "Terminals belong to a repository: select one in the repository switcher at the top, or add one to this workspace with “+ Repo”."); return; }
     let data;
     try { data = await api("POST", rp("/terminals"), { cols: 120, rows: 30 }); } catch (err) { toast("bad", "Terminal: " + err.message); return; }
     const t = data.terminal, tabs = $("#bottom-tabs");
@@ -418,8 +441,7 @@
   // ----- event wiring -----------------------------------------------------------------------
   function wire() {
     window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { for (const e of S.terminals.values()) e.term.options.theme = xtermTheme(); });
-    $("#workspace-select").addEventListener("change", (ev) => { S.workspaceId = ev.target.value; const w = S.workspaces.find((x) => x.id === ev.target.value); const r = w && w.repos.find((x) => x.exists); if (r) selectRepo(r.id); else { S.repoId = null; S.stateSeq++; S.selection = null; renderDetail(); renderWorkspaces(); refreshAll(); } });
-    $("#repo-select").addEventListener("change", (ev) => selectRepo(ev.target.value));
+    $("#repo-switch").addEventListener("click", (ev) => { if ($("#repo-menu").open) closeRepoMenu(); else openRepoMenu(ev.currentTarget); });
     $("#workspace-list").addEventListener("click", async (ev) => {
       const del = ev.target.closest("[data-del-repo]"), delWs = ev.target.closest("[data-del-ws]"), addWt = ev.target.closest("[data-add-wt]"), delWt = ev.target.closest("[data-del-wt]"), repo = ev.target.closest("[data-repo]");
       if (addWt) { await newWorktree(addWt.dataset.addWt); return; }
@@ -433,7 +455,7 @@
     $("#btn-add-repo-2").addEventListener("click", () => $("#btn-add-repo").click());
     $("#btn-add-repo").addEventListener("click", async () => {
       if (!S.workspaces.length) { toast("warn", "Create a workspace first."); return; }
-      const wid = $("#workspace-select").value || S.workspaces[0].id;
+      const wid = S.workspaceId || S.workspaces[0].id;
       const path = await dialog("Add repository", "Absolute path to a folder inside a git repository on this machine.", { input: "Path", ok: "Add" });
       if (path) { try { const r = await api("POST", "/api/workspaces/" + wid + "/repos", { path }); await loadWorkspaces(); toast("ok", "Added " + r.name); selectRepo(r.id); } catch (e) { toast("bad", e.message, true); } }
     });
@@ -442,10 +464,7 @@
       const body = {}; if (k === "push" && S.state && !S.state.upstream) { if (!(await dialog("Push", "No upstream is set. Push to origin and set it as upstream?", { ok: "Push" }))) return; body.set_upstream = true; }
       const res = await runJob(k, body, k[0].toUpperCase() + k.slice(1)); if (res) toast("ok", k + " done" + (res.output ? ": " + res.output.split("\n").slice(-1)[0] : "")); await refreshGraph();
     }));
-    $("#btn-terminal").addEventListener("click", openTerminal);
-    $("#btn-credentials").addEventListener("click", showCredentials);
     $("#btn-help").addEventListener("click", () => $("#help").showModal());
-    $("#btn-model").addEventListener("click", openModelDialog);
     $("#model-test").addEventListener("click", testModelConnection);
     $("#model-form").addEventListener("submit", saveModelSettings);
     $("#provider-choice").addEventListener("change", syncLocalSection);
