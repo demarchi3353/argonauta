@@ -198,6 +198,8 @@
   function renderBranches(st) {
     const g = ArgonautaBranches.groupBranches(st.branches, st.remotes, S.branchFilter);
     const q = S.branchFilter.trim();
+    const ae = document.activeElement;
+    const focusKey = ae && ae.closest && ae.closest("#branch-list, #remote-branch-list") ? (ae.dataset.branch !== undefined ? ["branch", ae.dataset.branch] : ae.dataset.remoteBranch !== undefined ? ["remoteBranch", ae.dataset.remoteBranch] : null) : null;
     const none = '<li class="muted">No branches match “' + esc(q) + '”.</li>';
     const cnt = (shown, total) => "· " + (shown === total ? total : shown + " of " + total);
     $("#branch-list").innerHTML = g.locals.map((b) => '<li role="option" tabindex="0" aria-selected="' + b.is_current + '" data-branch="' + esc(b.name) + '" title="' + (b.is_current ? "current branch" : "click to check out") + '">' + ic(b.is_current ? "i-check" : "i-branch") + '<span class="name">' + esc(b.name) + "</span>" +
@@ -208,6 +210,11 @@
       (q ? none : '<li class="muted">No remote branches (' + (st.remotes.length ? esc(st.remotes.map((r) => r.name).join(", ")) : "no remotes") + ").</li>");
     $("#branch-count").textContent = cnt(g.localShown, g.localTotal);
     $("#remote-count").textContent = cnt(g.remoteShown, g.remoteTotal);
+    if (focusKey) {
+      const attr = focusKey[0] === "branch" ? "data-branch" : "data-remote-branch";
+      const again = Array.from(document.querySelectorAll("#branch-list [" + attr + "], #remote-branch-list [" + attr + "]")).find((el) => el.getAttribute(attr) === focusKey[1]);
+      if (again) again.focus();
+    }
   }
   function renderState() {
     const st = S.state;
@@ -217,7 +224,7 @@
     if (st) {
       const term = st.terminal || { available: true, reason: null };
       const tb = document.querySelector('[data-rail="terminal"]');
-      if (tb) { tb.disabled = !term.available; tb.title = term.available ? "New terminal" : term.reason; }
+      if (tb) { tb.disabled = !term.available; tb.title = term.available ? "New terminal" : term.reason; tb.setAttribute("aria-label", term.available ? "New terminal" : "New terminal: " + term.reason); }
     }
     if (!st) {
       $("#branch-list").innerHTML = ""; $("#remote-branch-list").innerHTML = ""; $("#branch-count").textContent = ""; $("#remote-count").textContent = ""; renderChanges(null); $("#store-missing").hidden = true; $("#assistant").hidden = true;

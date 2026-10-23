@@ -9,7 +9,8 @@ from argonauta.web.terminal import TerminalError, TerminalManager
 class FakePTY:
     instances = []
 
-    def __init__(self, cols, rows):
+    def __init__(self, cols, rows, backend=None):
+        self.backend = backend
         self.cols, self.rows, self.out, self.spawned, self.alive_flag, self.pid = cols, rows, "", None, True, 4242
         FakePTY.instances.append(self)
 
@@ -43,6 +44,7 @@ class WinptyError(Exception):
 @pytest.fixture
 def fake_winpty(monkeypatch, tmp_path):
     mod = types.ModuleType("winpty"); mod.PTY = FakePTY; mod.WinptyError = WinptyError
+    mod.Backend = types.SimpleNamespace(ConPTY=0)
     monkeypatch.setitem(sys.modules, "winpty", mod)
     FakePTY.instances.clear()
     shell = tmp_path / "pwsh.exe"; shell.write_text(""); shell.chmod(0o755)
@@ -61,6 +63,39 @@ def test_spawn_passes_cwd_env_and_cmdline(fake_winpty, tmp_path):
     assert "TERM=xterm-256color\0" in env and "COLORTERM=truecolor\0" in env and env.endswith("\0")
     assert s.cols == 100 and s.pid == 4242 and s.alive() and s.id.startswith("t_")
     s.kill()
+
+
+def test_spawn_quotes_a_shell_path_with_spaces_and_pins_conpty(fake_winpty, tmp_path):
+    from argonauta.web.terminal_windows import WindowsTerminalSession
+    spaced = tmp_path / "Program Files" / "pwsh.exe"
+    spaced.parent.mkdir(); spaced.write_text(""); spaced.chmod(0o755)
+    s = WindowsTerminalSession.spawn(tmp_path, shell=str(spaced))
+    assert FakePTY.instances[-1].spawned[0] == '"' + str(spaced) + '"' and FakePTY.instances[-1].backend == 0
+    s.kill()
+    s = WindowsTerminalSession.spawn(tmp_path, shell=str(fake_winpty))
+    assert FakePTY.instances[-1].spawned[0] == str(fake_winpty)
+    s.kill()
+
+
+def test_kill_with_no_pid_and_shutdown_survives_a_failing_session(fake_winpty, tmp_path):
+    from argonauta.web.terminal_windows import WindowsTerminalSession
+    s = WindowsTerminalSession.spawn(tmp_path, shell=str(fake_winpty))
+    s.pid = None
+    s.kill()
+    m = TerminalManager(backend="conpty")
+    killed = []
+
+    class Bad:
+        id = "bad"
+        def kill(self): raise RuntimeError("boom")
+
+    class Good:
+        id = "good"
+        def kill(self): killed.append(1)
+
+    m._sessions = {"a": Bad(), "b": Good()}
+    m.shutdown()
+    assert killed == [1]
 
 
 def test_read_write_resize_and_exit(fake_winpty, tmp_path):

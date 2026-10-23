@@ -12,7 +12,11 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-MISSING_PYWINPTY = 'Terminals on Windows need the pywinpty package: pip install "argonauta[windows]"'
+from argonauta.logging_setup import get_logger
+
+log = get_logger()
+
+MISSING_PYWINPTY = 'Terminals on Windows need the pywinpty package: pip install pywinpty (or pip install -e ".[windows]" from the checkout)'
 
 
 class TerminalError(RuntimeError):
@@ -129,7 +133,10 @@ class TerminalManager:
             sessions = list(self._sessions.values())
             self._sessions.clear()
         for session in sessions:
-            session.kill()
+            try:
+                session.kill()
+            except Exception:  # noqa: BLE001 - one bad session must not strand the rest
+                log.warning("terminal %s kill failed", getattr(session, "id", "?"), exc_info=True)
 
 
 def __getattr__(name: str):

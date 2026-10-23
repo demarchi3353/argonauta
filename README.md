@@ -28,7 +28,9 @@ argonauta history
 
 ## Setup
 
-Requirements: Python 3.12 or newer, git 2.24 or newer, macOS, Linux or Windows 10 (1809+). A browser for the web UI; any recent Chrome, Firefox or Safari works.
+Requirements: Python 3.12 or newer, git 2.24 or newer, macOS, Linux or
+Windows 10 (1809+). A browser for the web UI; any recent Chrome, Firefox or
+Safari works.
 
 ```
 scripts/install.sh         # creates .venv, installs argonauta[anthropic,dev], copies .env.example to .env
@@ -206,8 +208,8 @@ workspace called "Default".
 
 ### Embedded terminal
 
-"Terminal" opens a tab with a real login shell started inside the selected
-repository, with your normal environment; the tab is named after the
+"Terminal" opens a tab with your shell (a login shell on macOS and Linux,
+PowerShell or cmd on Windows) started inside the selected repository, with your normal environment; the tab is named after the
 repository and you can open several. It is wired to the page through a
 WebSocket on the same loopback server.
 
@@ -290,7 +292,8 @@ the draft or the Review button.
 ### Keyboard and states
 
 Shortcuts: `1`–`4` inspector tabs (Detail, Changes, Proposals, Credentials),
-`5` Review, `r` review, `p` proposal field, `c` commit message, `t` new terminal, `b` toggles the Branches panel, `/` filter commits,
+`5` Review, `r` review, `p` proposal field, `c` commit message, `t` new
+terminal, `b` toggles the Branches panel, `/` filter commits,
 `?` help, `Esc` closes dialogs, the diff view, the review report, the branches panel and menus.
 Every control is reachable
 with Tab and has a visible focus ring; arrows move through the commit list
@@ -621,8 +624,9 @@ thread and real pty shells, not mocks:
   deletion stay with `git` itself (the terminal tab is right there).
 - **Terminal tabs do not survive a page reload**; the shell is closed when the
   socket closes.
-- The Windows terminal needs the pywinpty extra and has been exercised on one
-  machine only; the shell scripts in scripts/ are POSIX.
+- **The Windows terminal needs the pywinpty extra** and was written against a
+  fake of the pywinpty API; it has not yet been exercised on real Windows. The
+  shell scripts in scripts/ are POSIX.
 - **No security certification.** Input validation and the protected-path rules
   are tested, but this is a personal tool: review every diff before `apply`.
 

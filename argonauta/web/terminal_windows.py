@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import secrets
 import signal
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -56,10 +57,14 @@ class WindowsTerminalSession:
             raise TerminalError(f"shell not found: {shell}")
         cols = max(10, min(int(cols), 500))
         rows = max(3, min(int(rows), 200))
-        pty = PTY(cols, rows)
+        import winpty
+
+        # Pin ConPTY: the quoted appname below is only right for that backend.
+        backend = getattr(getattr(winpty, "Backend", None), "ConPTY", None)
+        pty = PTY(cols, rows, backend=backend) if backend is not None else PTY(cols, rows)
         env = env_block({"TERM": "xterm-256color", "COLORTERM": "truecolor"})
         try:
-            started = pty.spawn(appname=shell, cmdline=shell_cmdline(shell), cwd=str(repo_root), env=env)
+            started = pty.spawn(appname=subprocess.list2cmdline([shell]), cmdline=shell_cmdline(shell), cwd=str(repo_root), env=env)
         except WinptyError as exc:
             log.warning("terminal spawn of %s failed", shell, exc_info=True)
             raise TerminalError(f"could not start {shell}: {exc}") from exc
@@ -138,12 +143,13 @@ class WindowsTerminalSession:
             self._closed = True
             pty = self._pty
             if pty is not None and self._isalive(pty):  # not self.alive(): _exited may be spurious
-                try:
-                    os.kill(self.pid, signal.SIGTERM)
-                except OSError:
-                    pass
+                if self.pid:
+                    try:
+                        os.kill(self.pid, signal.SIGTERM)
+                    except (OSError, TypeError):
+                        pass
             self._exited = True
-            self._pty = None  # dropping the PTY closes its handles
+            self._pty = None  # the console closes when the last reference goes (the local `pty` here, the pump thread's)
             gone = pty is None
             deadline = time.monotonic() + 1.0
             while not gone:

@@ -239,6 +239,7 @@ def test_branch_filter_and_grouping():
     assert "<dt>b</dt><dd>Toggle the Branches panel" in html
     assert "branchFilter: \"\"" in js and "ArgonautaBranches.groupBranches(" in js and "function renderBranches(" in js
     assert "S.branchFilter = " in js and 'ev.key === "b"' in js
+    assert 'document.activeElement' in js.split("function renderBranches(", 1)[1].split("function renderState(", 1)[0]
     assert 'class="group" role="presentation"' in js and "data-remote-branch=" in js
     assert "#side-branches .list li .name { white-space: normal; overflow-wrap: anywhere; }" in css
     assert ".side { width: 280px;" in css
