@@ -12,7 +12,7 @@
   const S = {
     token: null, workspaces: [], workspaceId: null, repoId: null, stateSeq: 0, state: null, graph: [], proposals: [], events: [],
     selection: null, openDiff: null, detail: null, diffSeq: 0, graphScroll: 0, inspectorTab: "detail", bottomTab: "events", bottomOpen: false, sidePanel: null, terminals: new Map(), busy: new Set(), filter: "", pollTimer: null, changeCount: 0,
-    reviews: [], prs: null, review: { source: "worktree", mode: "code", pr: null },
+    reviews: [], prs: null, prsOrigin: null, prsError: null, reviewSel: null, review: { source: "worktree", mode: "code", pr: null },
   };
 
   // ----- token and api -----------------------------------------------------------------
@@ -133,6 +133,7 @@
   }
   async function selectRepo(id) {
     S.repoId = id; S.selection = null; S.detail = null; S.graph = []; S.proposals = []; S.stateSeq++; closeDiffView();
+    S.prs = null; S.prsOrigin = null; S.prsError = null; S.review.pr = null; S.reviewSel = null; S.reviews = []; $("#review-pr").dataset.html = ""; $("#review-error").textContent = "";
     const owner = S.workspaces.find((w) => w.repos.some((r) => r.id === id)); if (owner) S.workspaceId = owner.id;
     try { localStorage.setItem("argonauta.repo", id); } catch (e) { /* ignore */ }
     renderWorkspaces(); renderDetail();
@@ -559,19 +560,21 @@
   }
   function renderReviewHistory() {
     const ul = $("#review-history"), cur = S.reviewSel;
-    ul.innerHTML = S.reviews.map((r) => '<li><button type="button" class="hist-row" data-review="' + esc(r.id) + '" aria-pressed="' + (cur === r.id) + '"><span class="mono">#' + esc(r.id) + "</span><span>" + esc(r.mode) + '</span><span class="hist-src">' + esc(r.source_label || r.source_kind) + "</span><span>" + esc(r.provider || "") + '</span><span class="muted" title="' + esc(r.created_at) + '">' + esc(relTime(r.created_at)) + '</span><span class="hist-status ' + esc(r.status) + '">' + esc(r.status) + "</span></button></li>").join("");
+    const html = S.reviews.map((r) => '<li><button type="button" class="hist-row" data-review="' + esc(r.id) + '" aria-pressed="' + (cur === r.id) + '"><span class="mono">#' + esc(r.id) + "</span><span>" + esc(r.mode) + '</span><span class="hist-src">' + esc(r.source_label || r.source_kind) + "</span><span>" + esc(r.provider || "") + '</span><span class="muted" title="' + esc(r.created_at) + '">' + esc(relTime(r.created_at)) + '</span><span class="hist-status ' + esc(r.status) + '">' + esc(r.status) + "</span></button></li>").join("");
+    if (ul.dataset.html !== html) { ul.innerHTML = html; ul.dataset.html = html; }
     $("#review-empty").hidden = S.reviews.length > 0;
   }
   async function refreshReviews() {
     if (!S.repoId || !S.state || !S.state.store.initialized) { S.reviews = []; renderReviewTab(); return; }
-    try { S.reviews = (await api("GET", rp("/reviews?limit=50"))).reviews; } catch (err) { S.reviews = []; }
+    const seq = S.stateSeq;
+    try { const r = (await api("GET", rp("/reviews?limit=50"))).reviews; if (seq !== S.stateSeq) return; S.reviews = r; } catch (err) { if (seq !== S.stateSeq) return; S.reviews = []; }
     renderReviewTab();
   }
   async function loadPrs() {
     if (!S.repoId) return;
-    const btn = $("#btn-review-prs"); btn.disabled = true; S.prsError = null;
-    try { const d = await api("GET", rp("/github/prs")); S.prs = d.prs; S.prsOrigin = d.origin || null; }
-    catch (err) { S.prs = []; S.prsOrigin = null; S.prsError = err.data && err.data.error ? err.data.error : err.message; }
+    const btn = $("#btn-review-prs"), seq = S.stateSeq; btn.disabled = true; S.prsError = null;
+    try { const d = await api("GET", rp("/github/prs")); if (seq !== S.stateSeq) return; S.prs = d.prs; S.prsOrigin = d.origin || null; }
+    catch (err) { if (seq !== S.stateSeq) return; S.prs = []; S.prsOrigin = null; S.prsError = err.data && err.data.error ? err.data.error : err.message; }
     finally { btn.disabled = false; }
     renderReviewTab();
   }

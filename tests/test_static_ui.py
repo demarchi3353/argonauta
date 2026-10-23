@@ -157,3 +157,5 @@ def test_review_tab_structure():
     assert '"review"' in js.split("const INSPECTOR_TABS", 1)[1].split("\n", 1)[0]
     assert "function runReview" in js and "function refreshReviews" in js and "function loadPrs" in js
     assert "<dt>5</dt>" in html or "<dt>1-5</dt>" in html or "<dt>1–5</dt>" in html
+    repo_fn = js.split("async function selectRepo", 1)[1].split("async function", 1)[0]
+    assert "S.prs = null" in repo_fn and "S.review.pr = null" in repo_fn  # the PR list belongs to one repository
