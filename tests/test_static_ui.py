@@ -103,3 +103,5 @@ def test_diff_view_markup_and_handlers():
     # repo switch and discard close the view
     assert js.count("closeDiffView()") >= 3
     assert "No changes." in js
+    # a clean merge has an empty patch but still lists its files
+    assert "&& !(stats && stats.length)) return" in js

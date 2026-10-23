@@ -307,10 +307,10 @@
     return RTF.format(0, "second");
   }
   // per-file rows for a combined patch; stats (path, status, insertions, deletions) fill in the counts.
-  // An empty patch (a clean merge shows none) is "No changes.", whatever the stats list.
+  // A clean merge has an empty patch but still lists its files: those rows are disabled (no text to open).
   function patchFilesHtml(diff, stats) {
-    if (!diff || !diff.trim()) return { chunks: [], html: '<div class="empty">No changes.</div>' };
-    const chunks = window.ArgonautaPatch.splitPatch(diff);
+    if ((!diff || !diff.trim()) && !(stats && stats.length)) return { chunks: [], html: '<div class="empty">No changes.</div>' };
+    const chunks = window.ArgonautaPatch.splitPatch(diff || "");
     const byPath = new Map((stats || []).map((f) => [f.path, f]));
     const count = (text, sign) => { let n = 0, inHunk = false; for (const l of text.split("\n")) { if (l.startsWith("@@")) inHunk = true; else if (inHunk && l.startsWith(sign)) n++; } return n; };
     const rows = chunks.map((ch, i) => {
@@ -319,7 +319,7 @@
     });
     byPath.forEach((f) => rows.push({ i: null, path: f.path, status: f.status, ins: f.insertions, del: f.deletions }));
     const html = '<h3>Files (' + rows.length + ')</h3><ul class="cfiles">' + rows.map((r) => '<li><button type="button" class="cfile" ' + (r.i === null ? 'disabled title="No textual diff for this file"' : 'data-cfile="' + r.i + '" aria-current="false" title="Open the diff of ' + esc(r.path) + '"') + '><span class="code ' + esc(r.status) + '">' + esc(r.status) + '</span><span class="path">' + (r.oldPath ? esc(r.oldPath) + " → " : "") + esc(r.path) + '</span><span class="muted">' + (r.binary ? "binary" : "+" + esc(r.ins) + " −" + esc(r.del)) + "</span></button></li>").join("") + "</ul>" +
-      '<button type="button" class="btn mini ghost" data-cpatch="1">View whole patch</button>';
+      (chunks.length ? '<button type="button" class="btn mini ghost" data-cpatch="1">View whole patch</button>' : "");
     return { chunks, html };
   }
   // a different commit or proposal in Detail closes a diff opened from the previous one
@@ -337,7 +337,7 @@
       S.detail = { kind: "commit", sha: c.sha, diff: d.diff || "", chunks: files.chunks }; closeStaleDetailDiff();
       pane.innerHTML = '<h2 class="title">' + esc(c.subject) + "</h2><dl class='kv'><dt>author</dt><dd>" + esc(c.author) + " &lt;" + esc(c.email) + "&gt;</dd><dt>date</dt><dd title='" + esc(c.date) + "'>" + esc(relTime(c.date)) + "</dd><dt>sha</dt><dd class='mono'>" + esc(c.sha) + "</dd><dt>signature</dt><dd class='sig " + sig + "'>" + (SIG[sig] || "·") + " " + sig.replace("_", " ") + (d.signer ? " · " + esc(d.signer) : "") + (d.key_id ? " · key " + esc(d.key_id) : "") + "</dd>" + (c.refs.length ? "<dt>refs</dt><dd>" + esc(c.refs.join(", ")) + "</dd>" : "") + "</dl>" + (d.body ? "<p>" + esc(d.body).replace(/\n/g, "<br>") + "</p>" : "") + files.html;
       markCfile();
-    } catch (err) { pane.innerHTML = '<div class="empty">✗ ' + esc(err.message) + "</div>"; }
+    } catch (err) { S.detail = null; closeStaleDetailDiff(); pane.innerHTML = '<div class="empty">✗ ' + esc(err.message) + "</div>"; }
   }
   async function showProposal(pid) {
     S.selection = { type: "proposal", id: pid }; selectTab("inspector", "detail");
@@ -353,7 +353,7 @@
         (p.explanation ? "<p>" + esc(p.explanation).replace(/\n/g, "<br>") + "</p>" : "") + files.html +
         (runs.length ? "<h3>Test runs</h3><table class='table'><thead><tr><th>#</th><th>status</th><th>exit</th><th>finished</th></tr></thead><tbody>" + runs.map((r) => "<tr><td>" + r.id + "</td><td class='status-" + (r.status === "passed" ? "ok" : "bad") + "'>" + esc(r.status) + "</td><td>" + esc(r.exit_code) + "</td><td>" + esc(r.finished_at) + "</td></tr>").join("") + "</tbody></table>" + (runs[0].status !== "passed" && runs[0].output_tail ? "<pre class='diff'>" + esc(runs[0].output_tail) + "</pre>" : "") : "");
       markCfile();
-    } catch (err) { pane.innerHTML = '<div class="empty">✗ ' + esc(err.message) + "</div>"; }
+    } catch (err) { S.detail = null; closeStaleDetailDiff(); pane.innerHTML = '<div class="empty">✗ ' + esc(err.message) + "</div>"; }
   }
   async function showCredentials() {
     selectTab("inspector", "credentials"); const pane = $("#pane-credentials");
@@ -592,7 +592,7 @@
     $("#remote-branch-list").addEventListener("click", async (ev) => { const li = ev.target.closest("[data-remote-branch]"); if (!li) return; const name = li.dataset.remoteBranch.split("/").slice(1).join("/"); if (await dialog("Checkout remote branch", "Create local branch " + name + " tracking " + li.dataset.remoteBranch + "?", { ok: "Checkout" })) { try { await api("POST", rp("/branches"), { name, from: li.dataset.remoteBranch }); await api("POST", rp("/checkout"), { name }); toast("ok", "Checked out " + name); await refreshAll(); } catch (e) { toast("bad", e.message, true); } } });
     $("#btn-new-branch").addEventListener("click", async () => { if (!S.repoId) return; const name = await dialog("New branch", "Created from the current HEAD and checked out.", { input: "Branch name", ok: "Create" }); if (!name) return; try { await api("POST", rp("/branches"), { name }); await api("POST", rp("/checkout"), { name }); toast("ok", "On " + name); await refreshAll(); } catch (e) { toast("bad", e.message, true); } });
     const changes = $("#pane-changes");
-    changes.addEventListener("change", async (ev) => { const cb = ev.target.closest("[data-toggle]"); if (!cb) return; const path = cb.dataset.path, area = cb.dataset.toggle; try { await api("POST", rp(area === "index" ? "/unstage" : "/stage"), { paths: [path] }); } catch (e) { toast("bad", e.message); } const od = S.openDiff; if (od && (od.kind === "worktree" || od.kind === "index") && od.path === path) await showFileDiff(area === "index" ? "worktree" : "index", path); await refreshState(); });
+    changes.addEventListener("change", async (ev) => { const cb = ev.target.closest("[data-toggle]"); if (!cb) return; const path = cb.dataset.path, area = cb.dataset.toggle; try { await api("POST", rp(area === "index" ? "/unstage" : "/stage"), { paths: [path] }); } catch (e) { toast("bad", e.message); await refreshState(); return; } const od = S.openDiff, target = area === "index" ? "worktree" : "index"; if (od && (od.kind === "worktree" || od.kind === "index") && od.path === path) { od.kind = target; await showFileDiff(target, path); } await refreshState(); });
     changes.addEventListener("click", async (ev) => {
       const diff = ev.target.closest("[data-diff]"); if (diff) { showFileDiff(diff.dataset.diff, diff.dataset.path); return; }
       const discard = ev.target.closest("[data-discard]"); if (discard) { const p = discard.dataset.discard; if (await dialog("Discard changes", "Discard all changes in " + p + "? Untracked files are deleted. This cannot be undone.", { ok: "Discard", danger: true })) { try { await api("POST", rp("/discard"), { paths: [p] }); toast("ok", "Discarded " + p); } catch (e) { toast("bad", e.message); } const od = S.openDiff; if (od && (od.kind === "worktree" || od.kind === "index") && od.path === p) closeDiffView(); await refreshState(); } }
@@ -640,7 +640,8 @@
       const b = ev.target.closest("[data-stage], [data-unstage]"); if (!b) return;
       const stage = b.hasAttribute("data-stage"), path = stage ? b.dataset.stage : b.dataset.unstage; b.disabled = true;
       try { await api("POST", rp(stage ? "/stage" : "/unstage"), { paths: [path] }); } catch (e) { toast("bad", e.message); b.disabled = false; return; }
-      await showFileDiff(stage ? "index" : "worktree", path); await refreshState();
+      const target = stage ? "index" : "worktree"; if (S.openDiff && S.openDiff.path === path) S.openDiff.kind = target; // a poll during the re-fetch must not close the view
+      await showFileDiff(target, path); await refreshState();
     });
     document.addEventListener("keydown", (ev) => {
       const tag = (ev.target.tagName || "").toLowerCase(); if (["input", "textarea", "select"].includes(tag) || ev.target.closest(".xterm") || ev.metaKey || ev.ctrlKey || ev.altKey) return;
