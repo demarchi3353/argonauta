@@ -200,7 +200,7 @@
     const box = $("#graph"), rows = S.filter ? S.graph.filter((c) => (c.subject + " " + c.author + " " + c.sha + " " + c.refs.join(" ")).toLowerCase().includes(S.filter)) : S.graph;
     $("#graph-empty").hidden = S.graph.length > 0 || !S.repoId; $("#graph-count").textContent = S.graph.length ? rows.length + " of " + S.graph.length : "";
     const maxLane = rows.reduce((m, c) => Math.max(m, c.lane, ...(c.parent_lanes || []), c.active.length - 1), 0);
-    const laneW = 14, rowH = 28, x = (l) => 10 + l * laneW, y = (i) => i * rowH + rowH / 2;
+    const laneW = 14, rowH = 30, x = (l) => 10 + l * laneW, y = (i) => i * rowH + rowH / 2;
     box.style.setProperty("--lanes-width", (x(maxLane) + 14) + "px");
     const color = (l) => "var(" + LANES[l % LANES.length] + ")";
     const paths = [];
@@ -321,6 +321,10 @@
     const parent = r.parent_id && all.find((x) => x.id === r.parent_id);
     return parent ? parent.name + " \u203a " + r.name : r.name;
   }
+  function xtermTheme() {
+    const cs = getComputedStyle(document.documentElement), v = (n) => cs.getPropertyValue(n).trim();
+    return { background: v("--bg-0"), foreground: v("--text"), cursor: v("--accent"), selectionBackground: v("--bg-3") };
+  }
   async function openTerminal() {
     if (!S.repoId) { toast("warn", "Terminals belong to a repository: select one in the sidebar, or add one to this workspace with “+ Repo”."); return; }
     let data;
@@ -329,7 +333,7 @@
     const tab = document.createElement("button"); tab.className = "tab"; tab.setAttribute("role", "tab"); tab.dataset.tab = "term-" + t.id; const repoName = terminalName(S.repoId);
     tab.innerHTML = ic("i-terminal") + esc(repoName || "Terminal") + " <span class='close' aria-label='Close terminal' title='Close terminal'>×</span>"; tab.title = "Terminal in " + repoName; tabs.appendChild(tab);
     const pane = document.createElement("div"); pane.id = "pane-term-" + t.id; pane.className = "pane term-pane"; pane.setAttribute("role", "tabpanel"); pane.hidden = true; $("#terminal-panes").appendChild(pane);
-    const term = new Terminal({ cursorBlink: true, fontSize: 13, theme: { background: "#000000" } }); const fit = new FitAddon.FitAddon(); term.loadAddon(fit); term.open(pane);
+    const term = new Terminal({ cursorBlink: true, fontSize: 13, theme: xtermTheme() }); const fit = new FitAddon.FitAddon(); term.loadAddon(fit); term.open(pane);
     const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws/terminals/" + t.id); ws.binaryType = "arraybuffer";
     const entry = { id: t.id, term, fit, ws, tab, pane, repoId: S.repoId }; S.terminals.set(t.id, entry);
     // Auth must be the first frame: fit() can fire onResize, which would otherwise arrive before it.
@@ -413,6 +417,7 @@
 
   // ----- event wiring -----------------------------------------------------------------------
   function wire() {
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { for (const e of S.terminals.values()) e.term.options.theme = xtermTheme(); });
     $("#workspace-select").addEventListener("change", (ev) => { S.workspaceId = ev.target.value; const w = S.workspaces.find((x) => x.id === ev.target.value); const r = w && w.repos.find((x) => x.exists); if (r) selectRepo(r.id); else { S.repoId = null; S.stateSeq++; S.selection = null; renderDetail(); renderWorkspaces(); refreshAll(); } });
     $("#repo-select").addEventListener("change", (ev) => selectRepo(ev.target.value));
     $("#workspace-list").addEventListener("click", async (ev) => {

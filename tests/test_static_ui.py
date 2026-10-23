@@ -24,3 +24,15 @@ def test_index_has_brand_and_no_external_urls():
     urls = re.findall(r"https?://[^\s\"'<>]+", html + css)
     external = [u for u in urls if not u.startswith(ALLOWED_URL_PREFIXES)]
     assert not external, f"external network references in static UI: {external}"
+
+
+def test_css_declares_slate_tokens_in_both_schemes():
+    css = (STATIC / "app.css").read_text()
+    for token, dark in (("--bg-0", "#0f172a"), ("--bg-1", "#131c30"), ("--bg-2", "#1b2336"), ("--bg-3", "#272f42"),
+                        ("--line", "#2b3650"), ("--text", "#f1f5f9"), ("--muted", "#94a3b8"), ("--accent", "#22c55e"),
+                        ("--warn", "#f97316"), ("--bad", "#ef4444"), ("--focus", "#fbbf24")):
+        assert f"{token}: {dark}" in css, token
+    assert "prefers-color-scheme: light" in css
+    assert "--bg-0: #f8fafc" in css and "--accent: #16a34a" in css
+    assert '"IBM Plex Sans"' in css and '"JetBrains Mono"' in css
+    assert "prefers-reduced-motion: reduce" in css
