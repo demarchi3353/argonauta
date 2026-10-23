@@ -1,6 +1,7 @@
 """API tests against a real server thread, a temp repo and a bare remote."""
 import http.client
 import json
+import os
 import shutil
 import threading
 from pathlib import Path
@@ -95,6 +96,7 @@ def test_index_and_static_served_without_token(api):
     assert api.get("/app.js", token=None, origin=None, raw=True)[0] == 200
     assert api.get("/patch.js", token=None, origin=None, raw=True)[0] == 200
     assert api.get("/report.js", token=None, origin=None, raw=True)[0] == 200
+    assert api.get("/branches.js", token=None, origin=None, raw=True)[0] == 200
     assert api.get("/app.css", token=None, origin=None, raw=True)[0] == 200
     assert api.get("/vendor/xterm.js", token=None, origin=None, raw=True)[0] == 200
     status, body, headers = api.get("/logo.png", token=None, origin=None, raw=True)
@@ -342,6 +344,19 @@ def test_credentials_endpoint(api):
     assert data["ssh"]["kind"] in ("none", "ssh", "https", "local")
 
 
+def test_state_reports_terminal_support(api, monkeypatch):
+    from argonauta.web import terminal as terminal_mod
+    from argonauta.web.terminal import TerminalSupport
+    r = f"/api/repos/{api.repo.id}"
+    assert api.get(f"{r}/state")[1]["terminal"] == {"available": True, "reason": None}
+    off = TerminalSupport(False, "conpty", "needs pywinpty")
+    monkeypatch.setattr(type(api.ctx.terminals), "support", property(lambda self: off))
+    monkeypatch.setattr(terminal_mod, "terminal_support", lambda backend=None: off)
+    assert api.get(f"{r}/state")[1]["terminal"] == {"available": False, "reason": "needs pywinpty"}
+    assert api.post(f"{r}/terminals", {"cols": 80, "rows": 24})[0] == 409
+
+
+@pytest.mark.skipif(os.name != "posix", reason="pty backend")
 def test_terminal_create_list_delete(api):
     r = f"/api/repos/{api.repo.id}"
     assert api.post(f"{r}/terminals", {"cols": "x"})[0] == 400
@@ -384,9 +399,10 @@ def test_worktree_api_create_list_remove(api):
     # the worktree is a repository of its own: state, terminal, graph all work there
     st = api.get(f"/api/repos/{wt_id}/state")[1]
     assert st["branch"] == "feature-a" and st["repo"]["worktree"] is True
-    status, t = api.post(f"/api/repos/{wt_id}/terminals", {"cols": 80, "rows": 24})
-    assert status == 201 and t["terminal"]["repo_root"] == data["repo"]["path"]
-    api.request("DELETE", f"/api/terminals/{t['terminal']['id']}")
+    if os.name == "posix":
+        status, t = api.post(f"/api/repos/{wt_id}/terminals", {"cols": 80, "rows": 24})
+        assert status == 201 and t["terminal"]["repo_root"] == data["repo"]["path"]
+        api.request("DELETE", f"/api/terminals/{t['terminal']['id']}")
     # a dirty worktree refuses removal unless forced
     from pathlib import Path
     Path(data["repo"]["path"], "dirty.txt").write_text("x\n")

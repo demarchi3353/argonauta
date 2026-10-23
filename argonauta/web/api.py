@@ -262,6 +262,7 @@ def repo_state(ctx, params, query, body):
     current = next((b for b in branches if b.is_current), None)
     ab = gitops.ahead_behind(root)
     running = ctx.jobs.running_for(repo.id)
+    sup = ctx.terminals.support
     return 200, {
         "repo": repo.to_dict(),
         "branch": gitops.current_branch(root),
@@ -275,6 +276,7 @@ def repo_state(ctx, params, query, body):
         "store": _store_summary(repo),
         "running_job": running.to_dict() if running else None,
         "terminals": [t.to_dict() for t in ctx.terminals.list_for(root)],
+        "terminal": {"available": sup.available, "reason": sup.reason},
     }
 
 

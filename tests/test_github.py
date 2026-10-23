@@ -10,6 +10,8 @@ from argonauta import github
 from argonauta.github import GitHubError, find_gh_bin, gh_env, gh_status, list_prs, origin_slug, pr_comments, pr_detail, pr_diff
 from tests.conftest import git
 
+pytestmark = pytest.mark.skipif(os.name != "posix", reason="fake binaries are sh scripts")
+
 
 def fake_gh(tmp_path: Path, responses: dict[str, str]) -> Path:
     """A stand-in `gh` that records argv and env, then prints the response keyed by its first two words."""
