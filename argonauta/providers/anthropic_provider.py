@@ -7,7 +7,14 @@ summary and the contents of the selected context files. Nothing else.
 from __future__ import annotations
 
 from argonauta.config import Settings
-from argonauta.prompts import SYSTEM_PROMPT, ProposalRequest, build_user_message
+from argonauta.prompts import (
+    REVIEW_SYSTEM_PROMPT,
+    SYSTEM_PROMPT,
+    ProposalRequest,
+    ReviewRequest,
+    build_review_message,
+    build_user_message,
+)
 from argonauta.providers.base import ProgressCallback, ProviderError, ProviderReply, ProviderUnavailable
 
 MAX_OUTPUT_TOKENS = 32_000
@@ -31,6 +38,12 @@ class AnthropicProvider:
             raise ProviderUnavailable("ANTHROPIC_API_KEY is not set. Add it to .env or use the manual provider.")
 
     def propose(self, req: ProposalRequest, on_progress: ProgressCallback | None = None) -> ProviderReply:
+        return self._complete(SYSTEM_PROMPT, build_user_message(req), on_progress)
+
+    def review(self, req: ReviewRequest, on_progress: ProgressCallback | None = None) -> ProviderReply:
+        return self._complete(REVIEW_SYSTEM_PROMPT, build_review_message(req), on_progress)
+
+    def _complete(self, system: str, user: str, on_progress: ProgressCallback | None = None) -> ProviderReply:
         import anthropic
 
         # The endpoint is pinned: nothing from a repository can redirect requests.
@@ -38,8 +51,8 @@ class AnthropicProvider:
         kwargs: dict = {
             "model": self.settings.model,
             "max_tokens": MAX_OUTPUT_TOKENS,
-            "system": SYSTEM_PROMPT,
-            "messages": [{"role": "user", "content": build_user_message(req)}],
+            "system": system,
+            "messages": [{"role": "user", "content": user}],
             "thinking": {"type": "adaptive"},
             "output_config": {"effort": self.settings.effort},
         }

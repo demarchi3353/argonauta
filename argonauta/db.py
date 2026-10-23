@@ -13,11 +13,15 @@ from pathlib import Path
 
 from argonauta.models import (
     PROPOSAL_STATUSES,
+    REVIEW_MODES,
+    REVIEW_SOURCES,
+    REVIEW_STATUSES,
     TEST_STATUSES,
     Change,
     Event,
     IndexedFile,
     Proposal,
+    Review,
     TestRun,
     utcnow,
 )
@@ -49,6 +53,26 @@ CREATE TABLE IF NOT EXISTS terms (
     PRIMARY KEY (term, file_id)
 );
 CREATE INDEX IF NOT EXISTS idx_terms_file ON terms(file_id);
+CREATE TABLE IF NOT EXISTS reviews (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at    TEXT NOT NULL,
+    mode          TEXT NOT NULL,
+    source_kind   TEXT NOT NULL,
+    source_ref    TEXT NOT NULL DEFAULT '',
+    source_label  TEXT NOT NULL DEFAULT '',
+    source_diff   TEXT NOT NULL DEFAULT '',
+    omitted_files TEXT NOT NULL DEFAULT '[]',
+    comments      TEXT NOT NULL DEFAULT '[]',
+    draft         TEXT NOT NULL DEFAULT '',
+    provider      TEXT NOT NULL,
+    model         TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    summary       TEXT NOT NULL DEFAULT '',
+    findings      TEXT NOT NULL DEFAULT '[]',
+    raw           TEXT NOT NULL DEFAULT '',
+    input_tokens  INTEGER,
+    output_tokens INTEGER
+);
 CREATE TABLE IF NOT EXISTS proposals (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at    TEXT NOT NULL,
@@ -334,6 +358,74 @@ class Store:
         ).fetchall()
         return [Proposal.from_row(r) for r in rows]
 
+    # ----- reviews ---------------------------------------------------------
+    def create_review(
+        self,
+        *,
+        mode: str,
+        source_kind: str,
+        source_ref: str,
+        source_label: str,
+        source_diff: str,
+        omitted_files: list[str],
+        comments: list[dict],
+        draft: str,
+        provider: str,
+        model: str,
+        status: str,
+        summary: str,
+        findings: list[dict],
+        raw: str,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        created_at: str | None = None,
+    ) -> Review:
+        if mode not in REVIEW_MODES:
+            raise StoreError(f"Invalid review mode {mode!r}")
+        if source_kind not in REVIEW_SOURCES:
+            raise StoreError(f"Invalid review source {source_kind!r}")
+        if status not in REVIEW_STATUSES:
+            raise StoreError(f"Invalid review status {status!r}")
+        with self._tx():
+            cur = self.conn.execute(
+                "INSERT INTO reviews(created_at, mode, source_kind, source_ref, source_label, "
+                "source_diff, omitted_files, comments, draft, provider, model, status, summary, "
+                "findings, raw, input_tokens, output_tokens) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    created_at or utcnow(),
+                    mode,
+                    source_kind,
+                    source_ref,
+                    source_label,
+                    source_diff,
+                    json.dumps(omitted_files or []),
+                    json.dumps(comments or []),
+                    draft,
+                    provider,
+                    model,
+                    status,
+                    summary,
+                    json.dumps(findings or []),
+                    raw,
+                    input_tokens,
+                    output_tokens,
+                ),
+            )
+        return self.get_review(int(cur.lastrowid))
+
+    def get_review(self, review_id: int) -> Review:
+        row = self.conn.execute("SELECT * FROM reviews WHERE id = ?", (review_id,)).fetchone()
+        if row is None:
+            raise StoreError(f"No review with id {review_id}.")
+        return Review.from_row(row)
+
+    def list_reviews(self, limit: int = 50) -> list[Review]:
+        rows = self.conn.execute(
+            "SELECT * FROM reviews ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [Review.from_row(r) for r in rows]
+
     def count_proposals_by_status(self) -> dict[str, int]:
         rows = self.conn.execute(
             "SELECT status, COUNT(*) AS n FROM proposals GROUP BY status"
@@ -505,14 +597,14 @@ class Store:
     def clear_records(self) -> None:
         """Remove every proposal, change, test run and event (keeps index and settings)."""
         with self._tx():
-            for table in ("test_runs", "changes", "proposals", "events"):
+            for table in ("test_runs", "changes", "proposals", "events", "reviews"):
                 self.conn.execute(f"DELETE FROM {table}")
             self.conn.execute(
-                "DELETE FROM sqlite_sequence WHERE name IN ('test_runs','changes','proposals','events')"
+                "DELETE FROM sqlite_sequence WHERE name IN ('test_runs','changes','proposals','events','reviews')"
             )
 
     def raw_rows(self, table: str) -> list[dict]:
-        if table not in ("proposals", "changes", "test_runs", "events", "files", "settings"):
+        if table not in ("proposals", "changes", "test_runs", "events", "files", "settings", "reviews"):
             raise StoreError(f"Cannot export table {table!r}")
         rows = self.conn.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall()
         return [dict(r) for r in rows]

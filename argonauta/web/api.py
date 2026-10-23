@@ -8,7 +8,9 @@ resolved through the registry.
 from __future__ import annotations
 
 import dataclasses
+import os
 import re
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -17,6 +19,7 @@ from argonauta import gitops
 from argonauta.config import Settings, load_settings
 from argonauta.db import Store, StoreError
 from argonauta.diffs import _path_problem
+from argonauta.github import GitHubError, gh_installed, gh_status, list_prs, origin_slug
 from argonauta.logging_setup import get_logger
 from argonauta.providers import describe_provider
 from argonauta.web.graph import assign_lanes
@@ -220,11 +223,28 @@ def _status_areas(entries: list[gitops.FileStatus]) -> dict:
     return areas
 
 
+_gh_status_cache: tuple[float, str, dict] | None = None
+
+
+def cached_gh_status(ttl: float = 60.0, refresh: bool = False) -> dict:
+    """gh_status() spawns gh (one call hits the network), so reuse it briefly unless `refresh`."""
+    global _gh_status_cache
+    key = os.environ.get("ARGONAUTA_GH_BIN", "")
+    now = time.monotonic()
+    cached = _gh_status_cache
+    if not refresh and cached is not None and cached[1] == key and now - cached[0] < ttl:
+        return cached[2]
+    status = gh_status()
+    _gh_status_cache = (now, key, status)
+    return status
+
+
 def _store_summary(repo: Repo) -> dict:
     from argonauta.workflow import test_command_for
 
     settings = repo_settings(repo)
     summary = {"initialized": repo.initialized, "indexed_files": None, "last_indexed_at": None, "test_command": None, "provider": describe_provider(settings), "provider_name": settings.effective_provider}
+    summary["review_sources"] = {"branch_base": gitops.default_base_branch(repo.path) or None, "gh": {"installed": gh_installed()}}
     if repo.initialized:
         store = open_store(repo)
         try:
@@ -542,7 +562,7 @@ def list_events(ctx, params, query, body):
         store.close()
 
 
-@route("POST", rf"^/api/repos/(?P<rid>{ID})/jobs/(?P<kind>index|propose|test|apply)$")
+@route("POST", rf"^/api/repos/(?P<rid>{ID})/jobs/(?P<kind>index|propose|test|apply|review)$")
 def assistant_job(ctx, params, query, body):
     from argonauta.indexer import index_repo
 
@@ -568,6 +588,17 @@ def assistant_job(ctx, params, query, body):
         pid = raw_pid
         run_tests = require_bool(body, "test", True)
         do_commit = require_bool(body, "commit", True)
+    elif kind == "review":
+        source = body.get("source")
+        if not isinstance(source, dict):
+            raise ApiError(400, "source must be an object")
+        review_spec = workflow.ReviewSpec(
+            mode=require_str(body, "mode", 20),
+            source_kind=require_str(source, "kind", 20),
+            source_ref=require_str(source, "ref", 200, allow_empty=True).strip(),
+            draft=require_str(body, "draft", 20000, allow_empty=True),
+        )
+        _wf(lambda: workflow.validate_review_spec(review_spec))
     elif kind == "test":
         pid_opt = body.get("proposal_id")
         if pid_opt is not None and (not isinstance(pid_opt, int) or isinstance(pid_opt, bool) or pid_opt <= 0):
@@ -594,6 +625,12 @@ def assistant_job(ctx, params, query, body):
                     "proposal": jsonable(outcome.proposal),
                     "validation": {"ok": outcome.validation.ok, "errors": outcome.validation.errors, "files": outcome.validation.paths} if outcome.validation else None,
                 }
+            if kind == "review":
+                try:
+                    outcome = workflow.review(settings, store, review_spec, on_progress=progress)
+                except ProviderUnavailable as exc:
+                    return {"manual": True, "message": str(exc)}
+                return {"manual": False, "review": _review_payload(outcome.review, full=False)}
             if kind == "apply":
                 result = workflow.apply_proposal(settings, store, pid, run_tests_after=run_tests, commit_after=do_commit, on_progress=progress)
                 return {"proposal": jsonable(result.proposal), "change": jsonable(result.change), "test_run": jsonable(result.test_run), "commit_sha": result.commit_sha, "skipped_commit_reason": result.skipped_commit_reason}
@@ -604,6 +641,84 @@ def assistant_job(ctx, params, query, body):
             store.close()
 
     return submit_job(ctx, repo, kind, run)
+
+
+# ----- reviews and GitHub -------------------------------------------------------------------
+def _review_payload(review: Any, full: bool) -> dict:
+    d = jsonable(review)
+    d["source_diff"] = d["source_diff"] if full else None
+    d["raw"] = d["raw"] if full else None
+    if not full:
+        d["comments"] = None
+    return d
+
+
+def _require_initialized(repo: Repo) -> None:
+    if not repo.initialized:
+        raise ApiError(409, "repository is not initialised; run init first")
+
+
+@route("GET", r"^/api/github/status$")
+def github_status(ctx, params, query, body):
+    return 200, cached_gh_status(refresh=query_int(query, "refresh", 0, 0, 1) == 1)
+
+
+@route("GET", rf"^/api/repos/(?P<rid>{ID})/github/prs$")
+def github_prs(ctx, params, query, body):
+    repo = resolve_repo(ctx, params["rid"])
+    try:
+        return 200, {"origin": origin_slug(repo.path), "prs": list_prs(repo.path)}
+    except GitHubError as exc:
+        raise ApiError(409, str(exc)) from exc
+
+
+@route("GET", rf"^/api/repos/(?P<rid>{ID})/reviews$")
+def list_reviews(ctx, params, query, body):
+    repo = resolve_repo(ctx, params["rid"])
+    _require_initialized(repo)
+    store = open_store(repo)
+    try:
+        return 200, {"reviews": [_review_payload(r, full=False) for r in store.list_reviews(limit=query_int(query, "limit", 50, 1, 500))]}
+    finally:
+        store.close()
+
+
+@route("GET", rf"^/api/repos/(?P<rid>{ID})/reviews/(?P<rvid>\d{{1,9}})$")
+def get_review(ctx, params, query, body):
+    repo = resolve_repo(ctx, params["rid"])
+    _require_initialized(repo)
+    store = open_store(repo)
+    try:
+        try:
+            return 200, {"review": _review_payload(store.get_review(int(params["rvid"])), full=True)}
+        except StoreError as exc:
+            raise ApiError(404, str(exc)) from exc
+    finally:
+        store.close()
+
+
+@route("GET", rf"^/api/repos/(?P<rid>{ID})/reviews/(?P<rvid>\d{{1,9}})/diff$")
+def get_review_diff(ctx, params, query, body):
+    repo = resolve_repo(ctx, params["rid"])
+    _require_initialized(repo)
+    path = query.get("path")
+    if isinstance(path, list):
+        path = path[0] if path else None
+    if not path or not isinstance(path, str):
+        raise ApiError(404, "path is required")
+    store = open_store(repo)
+    try:
+        try:
+            review = store.get_review(int(params["rvid"]))
+        except StoreError as exc:
+            raise ApiError(404, str(exc)) from exc
+    finally:
+        store.close()
+    for chunk in re.split(r"(?m)^(?=diff --git )", review.source_diff or ""):
+        header = chunk.split("\n", 1)[0]
+        if header.endswith(f" b/{path}") or header.endswith(f' "b/{path}"'):
+            return 200, {"diff": chunk}
+    raise ApiError(404, f"{path} is not in this review's diff")
 
 
 # ----- credentials --------------------------------------------------------------------------

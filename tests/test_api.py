@@ -94,6 +94,7 @@ def test_index_and_static_served_without_token(api):
     assert "no-store" in headers.get("Cache-Control", "")
     assert api.get("/app.js", token=None, origin=None, raw=True)[0] == 200
     assert api.get("/patch.js", token=None, origin=None, raw=True)[0] == 200
+    assert api.get("/report.js", token=None, origin=None, raw=True)[0] == 200
     assert api.get("/app.css", token=None, origin=None, raw=True)[0] == 200
     assert api.get("/vendor/xterm.js", token=None, origin=None, raw=True)[0] == 200
     status, body, headers = api.get("/logo.png", token=None, origin=None, raw=True)
@@ -393,3 +394,45 @@ def test_worktree_api_create_list_remove(api):
     assert api.request("DELETE", f"{r}/worktrees/feature-a?force=1")[0] == 200
     assert api.get(f"/api/repos/{wt_id}/state")[0] == 404  # unregistered
     assert len(api.get(f"{r}/worktrees")[1]["worktrees"]) == 1
+
+
+def test_review_routes(api, monkeypatch, tmp_path):
+    from tests.test_github import fake_gh
+    repo = api.repo; r = f"/api/repos/{repo.id}"
+    import sys
+    api.post(f"{r}/init", {"test_command": ""}); api.wait_job(api.post(f"{r}/jobs/index")[1]["job"]["id"])
+    monkeypatch.setenv("ARGONAUTA_SCRIPTED_DIFF", str(Path(__file__).resolve().parent.parent / "examples" / "sample_review_reply.md"))
+    assert api.get("/api/github/status")[1]["installed"] in (True, False)
+    assert api.get(f"{r}/github/prs")[0] == 409  # no origin
+    git(repo.path, "remote", "add", "origin", "git@github.com:o/r.git")
+    monkeypatch.setenv("ARGONAUTA_GH_BIN", str(fake_gh(tmp_path, {"pr list": '[{"number": 3, "title": "T", "author": {"login": "me"}, "headRefName": "b", "updatedAt": "x"}]', "api user": '"me"'})))
+    status, data = api.get(f"{r}/github/prs")
+    assert status == 200 and data["origin"] == "o/r" and data["prs"][0]["number"] == 3
+    sources = api.get(f"{r}/state")[1]["store"]["review_sources"]
+    assert sources["branch_base"] in ("main", "master") and sources["gh"] == {"installed": True}  # no login check on /state
+    assert "api user" not in (tmp_path / "argv.txt").read_text()
+    assert api.get("/api/github/status?refresh=1")[1] == {"installed": True, "logged_in": True, "user": "me", "error": None}
+    assert (tmp_path / "argv.txt").read_text().count("api user") == 1
+    assert api.post(f"{r}/jobs/review", {"mode": "received", "source": {"kind": "worktree", "ref": ""}, "draft": ""})[0] == 400
+    assert api.post(f"{r}/jobs/review", {"mode": "mine", "source": {"kind": "worktree", "ref": ""}, "draft": ""})[0] == 400
+    (repo.path / "calc" / "core.py").write_text((repo.path / "calc" / "core.py").read_text() + "\n# x\n")
+    status, data = api.post(f"{r}/jobs/review", {"mode": "mine", "source": {"kind": "worktree", "ref": ""}, "draft": "calc/core.py:1 fine"})
+    job = api.wait_job(data["job"]["id"]); assert job["status"] == "done" and job["result"]["review"]["status"] == "ok"
+    rid = job["result"]["review"]["id"]
+    listed = api.get(f"{r}/reviews")[1]["reviews"]; assert listed[0]["id"] == rid and listed[0]["source_diff"] is None and listed[0]["raw"] is None
+    full = api.get(f"{r}/reviews/{rid}")[1]["review"]; assert "calc/core.py" in full["source_diff"] and full["draft"].startswith("calc/core.py")
+    assert api.get(f"{r}/reviews/{rid}/diff?path=calc/core.py")[1]["diff"].startswith("diff --git")
+    assert api.get(f"{r}/reviews/{rid}/diff?path=nope")[0] == 404 and api.get(f"{r}/reviews/999")[0] == 404
+    assert api.get(f"{r}/events")[1]["events"][0]["kind"] == "review"
+
+
+def test_cached_gh_status_spawns_gh_once(monkeypatch, tmp_path):
+    from argonauta.web import api as api_mod
+    from tests.test_github import fake_gh
+    monkeypatch.setenv("ARGONAUTA_GH_BIN", str(fake_gh(tmp_path, {"api user": '"me"'})))
+    monkeypatch.setattr(api_mod, "_gh_status_cache", None)
+    first = api_mod.cached_gh_status(); second = api_mod.cached_gh_status()
+    assert first == second
+    assert (tmp_path / "argv.txt").read_text().count("api user") == 1
+    assert api_mod.cached_gh_status(refresh=True) == first
+    assert (tmp_path / "argv.txt").read_text().count("api user") == 2

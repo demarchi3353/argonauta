@@ -9,6 +9,9 @@ from datetime import UTC, datetime
 
 PROPOSAL_STATUSES = ("proposed", "applied", "rejected", "invalid", "reverted")
 TEST_STATUSES = ("passed", "failed", "error")
+REVIEW_STATUSES = {"ok", "unparsed", "failed"}
+REVIEW_MODES = {"code", "received", "mine"}
+REVIEW_SOURCES = {"worktree", "commit", "branch", "pr"}
 
 
 def utcnow() -> str:
@@ -62,6 +65,51 @@ class Proposal:
             output_tokens=row["output_tokens"],
             notes=row["notes"] or "",
             is_sample=bool(row["is_sample"]),
+        )
+
+
+@dataclass(frozen=True)
+class Review:
+    id: int
+    created_at: str
+    mode: str
+    source_kind: str
+    source_ref: str
+    source_label: str
+    source_diff: str
+    omitted_files: list[str]
+    comments: list[dict]
+    draft: str
+    provider: str
+    model: str
+    status: str
+    summary: str
+    findings: list[dict]
+    raw: str
+    input_tokens: int | None
+    output_tokens: int | None
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> Review:
+        return cls(
+            id=row["id"],
+            created_at=row["created_at"],
+            mode=row["mode"],
+            source_kind=row["source_kind"],
+            source_ref=row["source_ref"],
+            source_label=row["source_label"],
+            source_diff=row["source_diff"],
+            omitted_files=json.loads(row["omitted_files"] or "[]"),
+            comments=json.loads(row["comments"] or "[]"),
+            draft=row["draft"],
+            provider=row["provider"],
+            model=row["model"],
+            status=row["status"],
+            summary=row["summary"],
+            findings=json.loads(row["findings"] or "[]"),
+            raw=row["raw"],
+            input_tokens=row["input_tokens"],
+            output_tokens=row["output_tokens"],
         )
 
 

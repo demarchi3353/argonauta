@@ -144,3 +144,84 @@ def test_accessibility_pass_fixes():
     assert '"focusout"' in js and '$("#btn-diff-back").focus(' in js
     assert "outline: 0" not in css.split(".filter:focus-within", 1)[1].split("}", 1)[0]  # the wrapper carries the ring
     assert 'class="row-c" role="option" tabindex="0"' not in js  # the commit list is one Tab stop (roving tabindex)
+
+
+def test_review_tab_structure():
+    html = (STATIC / "index.html").read_text(encoding="utf-8"); js = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert 'data-tab="review"' in html and 'id="pane-review"' in html and 'data-rail="review"' in html and 'id="badge-review"' in html
+    pane = html.split('id="pane-review"', 1)[1].split('id="pane-credentials"', 1)[0]
+    for i in ("review-source", "review-source-note", "review-mode", "review-draft", "review-gh", "btn-review-run", "review-error", "review-history", "review-empty"):
+        assert f'id="{i}"' in pane, i
+    for s in ("worktree", "commit", "branch", "pr"): assert f'data-source="{s}"' in pane
+    for m in ("code", "received", "mine"): assert f'data-mode="{m}"' in pane
+    assert '"review"' in js.split("const INSPECTOR_TABS", 1)[1].split("\n", 1)[0]
+    assert "function runReview" in js and "function refreshReviews" in js and "function loadPrs" in js
+    assert "<dt>5</dt>" in html or "<dt>1-5</dt>" in html or "<dt>1–5</dt>" in html
+    repo_fn = js.split("async function selectRepo", 1)[1].split("async function", 1)[0]
+    assert "S.prs = null" in repo_fn and "S.review.pr = null" in repo_fn  # the PR list belongs to one repository
+
+
+def test_report_view_markup_and_handlers():
+    html = (STATIC / "index.html").read_text(encoding="utf-8"); js = (STATIC / "app.js").read_text(encoding="utf-8")
+    center = html.split('id="center"', 1)[1].split('class="inspector"', 1)[0]
+    for i in ("report-view", "btn-report-back", "report-title", "report-sub", "report-summary", "report-body"): assert f'id="{i}"' in center, i
+    assert "function openReport" in js and "function closeReport" in js and 'kind: "review"' in js
+    assert "Not sent to the model" in js and "ignored the format" in js
+    readme = (STATIC.parent.parent.parent / "README.md").read_text(encoding="utf-8")
+    assert "### Review" in readme and "gh" in readme.split("### Review", 1)[1][:3000]
+
+
+def test_review_tab_keyboard_and_selection_polish():
+    js = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "function rovingTabindex" in js and "function radioKeys" in js
+    assert 'rovingTabindex($("#review-source"))' in js and 'rovingTabindex($("#review-mode"))' in js
+    assert '$("#review-source").addEventListener("keydown", radioKeys)' in js and '$("#review-mode").addEventListener("keydown", radioKeys)' in js
+    for key in ("ArrowRight", "ArrowLeft", "ArrowUp", "ArrowDown"): assert key in js.split("function radioKeys", 1)[1].split("\n  }", 1)[0]
+    close = js.split("function closeReport", 1)[1].split("\n  }", 1)[0]
+    assert "S.reviewSel = null" in close and "renderReviewHistory()" in close
+    assert "renderReviewTab()" in js.split("async function showProposal", 1)[1].split("\n", 2)[1]
+    r_key = [l for l in js.splitlines() if 'ev.key === "r"' in l][0]
+    assert "want.disabled" in r_key
+    render = js.split("function renderReviewTab", 1)[1].split("\n  function ", 1)[0]
+    assert render.count('#review-mode [data-mode]') == 1  # one loop sets the mode buttons
+    readme = (STATIC.parent.parent.parent / "README.md").read_text(encoding="utf-8")
+    assert "any file diff" in readme
+
+
+def test_review_acceptance_fixes():
+    js = (STATIC / "app.js").read_text(encoding="utf-8")
+    render = js.split("function renderReviewTab", 1)[1].split("\n  function ", 1)[0]
+    gh_text = js.split("function ghText", 1)[1].split("\n  }", 1)[0]
+    assert "ghText(gh)" in render and '"gh is not installed"' in gh_text and "gh auth login" in gh_text  # the PR option's title names the actual reason
+    readme = (STATIC.parent.parent.parent / "README.md").read_text(encoding="utf-8")
+    gh_par = readme.split("Pull requests are read through", 1)[1].split("\n\n", 1)[0]
+    assert "auth status" not in gh_par and "`api user`" in gh_par and "open pull requests" in gh_par
+
+
+def test_final_review_fixes():
+    js = (STATIC / "app.js").read_text(encoding="utf-8"); html = (STATIC / "index.html").read_text(encoding="utf-8")
+    css = (STATIC / "app.css").read_text(encoding="utf-8"); report = (STATIC / "report.js").read_text(encoding="utf-8")
+    # 3: the gh login is fetched by the page, not carried by /state; the PR refresh bypasses the cache
+    loader = js.split("async function loadGhStatus", 1)[1].split("\n  }", 1)[0]
+    assert '"/api/github/status"' in loader and '"?refresh=1"' in loader
+    assert "loadGhStatus(true)" in js and "loadGhStatus(false)" in js
+    # 5a: a finding opens its file at its line
+    assert 'row.classList.add("hit")' in js and 'scrollIntoView({ block: "center" })' in js and "REPORT.newLineIndex" in js
+    assert "data-rline" in report and "dataset.rline" in js and ".diff .hit" in css
+    # 5b: counts before the summary
+    assert "REPORT.summaryLine(review)" in js and "function countsLine" in report
+    # 7: a review blocks the assistant buttons and the other way round
+    busy = js.split("function setBusy", 1)[1].split("\n  }", 1)[0]
+    assert '"apply", "review"]' in busy
+    assert "othersBusy" in js.split("function renderReviewTab", 1)[1].split("\n  function ", 1)[0]
+    # 8: the store must exist first
+    assert 'id="review-store-missing"' in html and 'id="btn-review-init"' in html and "Initialize the store first" in html
+    # 9, 10: unparsed reviews warn and still show the stored notes
+    assert 'status === "unparsed") toast("warn"' in js
+    assert 'html = cards + \'<pre class="diff report-raw">\'' in js
+    # 11: the review error is shown inline
+    assert '"Reviewing", err)' in js
+    # 14: css
+    assert ".hist-status.manual" not in css and ".hist-status.unparsed" in css and ".sev.low" in css
+    # 15: report.js is loaded before app.js
+    assert html.index('src="/report.js"') < html.index('src="/app.js"') and "upstream default" not in js

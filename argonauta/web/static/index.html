@@ -24,6 +24,7 @@
   <symbol id="i-key" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></symbol>
   <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
+  <symbol id="i-review" viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></symbol>
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></symbol>
@@ -65,6 +66,7 @@
     <button class="btn icon ghost" type="button" aria-pressed="false" data-rail="branches" aria-label="Branches" title="Branches"><svg class="ic lg" aria-hidden="true"><use href="#i-branch"/></svg></button>
     <button class="btn icon ghost" type="button" aria-pressed="false" data-rail="changes" aria-label="Changes" title="Changes"><svg class="ic lg" aria-hidden="true"><use href="#i-commit"/></svg><span class="badge warn" id="badge-changes" hidden></span></button>
     <button class="btn icon ghost" type="button" aria-pressed="false" data-rail="proposals" aria-label="Proposals" title="Proposals"><svg class="ic lg" aria-hidden="true"><use href="#i-zap"/></svg><span class="badge warn" id="badge-proposals" hidden></span></button>
+    <button class="btn icon ghost" type="button" aria-pressed="false" data-rail="review" aria-label="Review" title="Review"><svg class="ic lg" aria-hidden="true"><use href="#i-review"/></svg><span class="badge warn" id="badge-review" hidden></span></button>
     <button class="btn icon ghost" type="button" data-rail="terminal" aria-label="New terminal" title="New terminal"><svg class="ic lg" aria-hidden="true"><use href="#i-terminal"/></svg></button>
     <button class="btn icon ghost" type="button" data-rail="events" aria-label="Events" title="Events"><svg class="ic lg" aria-hidden="true"><use href="#i-activity"/></svg></button>
     </div>
@@ -103,6 +105,17 @@
       </div>
       <div id="diff-body"></div>
     </div>
+    <div id="report-view" class="report-view" hidden>
+      <div class="diff-head">
+        <button class="btn ghost" id="btn-report-back" type="button" title="Back to the commit graph (Esc)">← Commits</button>
+        <span id="report-title"></span>
+        <span id="report-sub" class="muted"></span>
+      </div>
+      <div class="report" id="report-scroll">
+        <p id="report-summary"></p>
+        <div id="report-body"></div>
+      </div>
+    </div>
   <section class="bottom" id="bottom" aria-label="Terminals and events">
     <button class="strip" id="bottom-strip" type="button" aria-expanded="false" aria-controls="bottom-body"><svg class="ic" aria-hidden="true"><use href="#i-terminal"/></svg><span id="bottom-strip-label">Terminals (0) · Events</span></button>
     <div class="bottom-body" id="bottom-body">
@@ -121,6 +134,7 @@
       <button class="tab" role="tab" data-tab="changes" aria-selected="false" id="tab-changes" aria-controls="pane-changes" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-commit"/></svg>Changes<span class="count" id="count-changes"></span></button>
       <button class="tab" role="tab" data-tab="proposals" aria-selected="false" id="tab-proposals" aria-controls="pane-proposals" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-zap"/></svg>Proposals<span class="count" id="count-proposals"></span></button>
       <button class="tab" role="tab" data-tab="credentials" aria-selected="false" id="tab-credentials" aria-controls="pane-credentials" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-key"/></svg>Credentials</button>
+      <button class="tab" role="tab" data-tab="review" aria-selected="false" id="tab-review" aria-controls="pane-review" tabindex="-1"><svg class="ic" aria-hidden="true"><use href="#i-review"/></svg>Review</button>
     </div>
     <div id="pane-detail" role="tabpanel" aria-labelledby="tab-detail" class="pane">
       <div class="empty">Select a commit, a proposal or a file.</div>
@@ -166,6 +180,39 @@
       </table>
     </div>
     <div id="proposals-empty" class="empty" hidden>No proposals yet. Describe a change above.</div>
+    </div>
+    <div id="pane-review" role="tabpanel" aria-labelledby="tab-review" class="pane review-form" hidden>
+      <div id="review-store-missing" class="empty" hidden>
+        This repository has no Argonauta store yet; reviews are stored there.
+        <button class="btn" id="btn-review-init" type="button">Initialize the store first</button>
+      </div>
+      <div class="label" id="review-source-label">Review what</div>
+      <div id="review-source" class="seg-group" role="radiogroup" aria-labelledby="review-source-label">
+        <button type="button" class="seg" role="radio" aria-checked="true" data-source="worktree">Working tree</button>
+        <button type="button" class="seg" role="radio" aria-checked="false" data-source="commit">Commit</button>
+        <button type="button" class="seg" role="radio" aria-checked="false" data-source="branch">Branch</button>
+        <button type="button" class="seg" role="radio" aria-checked="false" data-source="pr">Pull request</button>
+      </div>
+      <div class="row review-pr-row" id="review-pr-row" hidden>
+        <select id="review-pr" aria-label="Pull request"></select>
+        <button type="button" class="btn icon ghost" id="btn-review-prs" aria-label="Refresh pull requests" title="Refresh pull requests"><svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg></button>
+      </div>
+      <div class="muted" id="review-source-note"></div>
+      <div class="label" id="review-mode-label">How</div>
+      <div id="review-mode" class="seg-group" role="radiogroup" aria-labelledby="review-mode-label">
+        <button type="button" class="seg" role="radio" aria-checked="true" data-mode="code">Review the code</button>
+        <button type="button" class="seg" role="radio" aria-checked="false" data-mode="received">Evaluate received comments</button>
+        <button type="button" class="seg" role="radio" aria-checked="false" data-mode="mine">Evaluate my draft</button>
+      </div>
+      <div id="review-draft-row" hidden>
+        <label for="review-draft" class="muted">Your draft review</label>
+        <textarea id="review-draft" maxlength="20000" rows="6" placeholder="Paste the review you intend to post"></textarea>
+      </div>
+      <div class="muted" id="review-gh"></div>
+      <div class="row"><button class="btn primary" id="btn-review-run" type="button"><svg class="ic" aria-hidden="true"><use href="#i-review"/></svg><span id="review-run-label">Review</span></button></div>
+      <div id="review-error" class="field-error" role="alert"></div>
+      <ul id="review-history" class="hist"></ul>
+      <div id="review-empty" class="empty">No reviews yet. Pick what to review and run one.</div>
     </div>
     <div id="pane-credentials" role="tabpanel" aria-labelledby="tab-credentials" class="pane" hidden></div>
   </section>
@@ -241,11 +288,13 @@
     <h2>Keyboard shortcuts</h2>
     <dl class="shortcuts">
       <dt>1-4</dt><dd>Detail, Changes, Proposals, Credentials tabs</dd>
+      <dt>5</dt><dd>Review tab</dd>
+      <dt>r</dt><dd>Open Review and focus the draft or the Review button</dd>
       <dt>p</dt><dd>Open Proposals and focus the task field</dd>
       <dt>c</dt><dd>Open Changes and focus the commit message</dd>
       <dt>t</dt><dd>Open a new terminal tab</dd>
       <dt>/</dt><dd>Filter commits</dd>
-      <dt>Esc</dt><dd>Close dialogs, the diff view, the branches panel and menus</dd>
+      <dt>Esc</dt><dd>Close dialogs, the diff view, the review report, the branches panel and menus</dd>
       <dt>?</dt><dd>This help</dd>
     </dl>
     <div class="row end"><button class="btn primary" value="close" type="submit">Close</button></div>
@@ -255,6 +304,7 @@
 <script src="/vendor/xterm.js"></script>
 <script src="/vendor/addon-fit.js"></script>
 <script src="/patch.js"></script>
+<script src="/report.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

@@ -114,10 +114,11 @@ when it is not running.
   branches, next to the graph; it only takes space while you have it open.
 - **Centre**: the commit graph. Opening a file from Changes, or from a commit
   or proposal, shows its diff in the centre instead of the graph, as GitKraken
-  does; the Back button or `Esc` returns to the graph.
+  does; the Back button or `Esc` returns to the graph. A review report opens
+  there too.
 - **Inspector**: tabs for Detail (the selected commit or proposal), Changes
-  (staged and unstaged files and the commit box), Proposals (the assistant)
-  and Credentials.
+  (staged and unstaged files and the commit box), Proposals (the assistant),
+  Review and Credentials.
 - **Bottom panel**: terminals and the Events log, under the graph. It
   collapses to a strip.
 
@@ -231,11 +232,47 @@ there and in `argonauta history --events`.
 Long operations (index, propose, tests, apply, fetch, pull, push) run in the
 background with a progress toast; one runs at a time per repository.
 
+### Review
+
+The "Review" inspector tab asks the configured provider to review a change.
+Pick a **source**: the uncommitted working tree, the commit selected in the
+graph (a merge commit is compared with its first parent), the current branch
+against its base (`main`, else `master`), or an open pull request. Pick a
+**mode**: "Code review" (findings with a severity), "Received review" (the
+model judges each comment someone left on the pull request, bots excluded:
+agree, partly or disagree) or "My review" (paste your draft and the model rates
+each point: sound, weak or wrong). The repository needs an Argonauta store
+(Initialize in the Proposals tab), where reviews are kept. `.env*` files and
+anything under `.git/` or `.argonauta/` are never sent, and very large diffs
+are trimmed; the files left out are listed in the report as "Not sent to the
+model".
+
+Pull requests are read through your own `gh` CLI, run by the server, never by
+the page, with the login from `gh auth login` and read-only commands only
+(`api user`, `pr list/view/diff`, GET requests for review comments). The
+tab shows whether `gh` is installed and, when you open the tab (and again on
+the pull-request refresh button), whether it is logged in (the active account,
+as `gh api user` sees it), and lists the repository's open pull requests. Argonauta never publishes
+anything to GitHub: no comments, no reviews, no approvals; you copy what you
+want to keep.
+
+The report opens in the centre in place of the graph, like a file diff: the
+counts per verdict or severity and the model's summary, then one card per finding with its verdict or severity,
+`path:line`, the quoted comment and its author, a title and the explanation.
+Clicking a card with a path opens that file's diff from the reviewed change,
+scrolled to and marking the finding's line when it is in the diff;
+Back or `Esc` returns to the report, and `Esc` again to the graph. While a
+report is open, any file diff (also one opened from Changes or Detail) returns
+to the report on Back. A reply the
+model did not format is kept and shown raw. Past reviews are listed in the tab
+and reopen the report. Shortcuts: `5` opens the tab, `r` opens it and focuses
+the draft or the Review button.
+
 ### Keyboard and states
 
 Shortcuts: `1`–`4` inspector tabs (Detail, Changes, Proposals, Credentials),
-`p` proposal field, `c` commit message, `t` new terminal, `/` filter commits,
-`?` help, `Esc` closes dialogs, the diff view, the branches panel and menus.
+`5` Review, `r` review, `p` proposal field, `c` commit message, `t` new terminal, `/` filter commits,
+`?` help, `Esc` closes dialogs, the diff view, the review report, the branches panel and menus.
 Every control is reachable
 with Tab and has a visible focus ring; arrows move through the commit list
 and Enter opens the focused item. Status is always shown with a symbol and text,
@@ -378,11 +415,20 @@ and points at `pip install 'argonauta[anthropic]'`.
 - **Network**: the page talks only to the loopback server that `argonauta ui`
   started, authenticated with a per-run token, and loads no external script,
   font or image (the fonts are vendored). Fetch, pull and push talk to your
-  remotes with your own credentials. The model request goes to the Anthropic
-  API or to the local model URL, and only when a provider is configured and you
-  propose without "Dry run" or `--from-diff`; it contains the system prompt, your task text, a
-  short repository summary (name, branch, file count, languages) and the
-  contents of the selected context files. Nothing else is ever sent anywhere.
+  remotes with your own credentials. Your own `gh` CLI is called on the server,
+  read-only, with its stored login (token variables are not passed on), and
+  only when the Review tab is used: `gh api user` when the tab is opened or the
+  pull-request list is refreshed, and `gh pr …` / `gh api repos/…` calls when
+  you list or review pull requests; nothing is ever posted to GitHub. A
+  proposal's model request goes to the configured provider (the Anthropic API,
+  the local model URL or the `claude` CLI) only when you propose without "Dry
+  run" or `--from-diff`; it contains the system prompt, your task text, a short
+  repository summary (name, branch, file count, languages) and the contents of
+  the selected context files. A review's model request contains the review
+  system prompt, the source diff (minus `.env*` files and anything under
+  `.git/` or `.argonauta/`), for a pull request its title, description and
+  (in "Received review") its comments, your draft (in "My review") and the same
+  repository summary. Nothing else is ever sent anywhere.
 - **`.env` is read with an allowlist.** Only `ANTHROPIC_API_KEY` and the
   non-executable `ARGONAUTA_*` tuning keys are loaded from the file; your shell
   always wins over it, and the API endpoint is pinned in code. The test

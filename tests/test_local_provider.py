@@ -158,3 +158,16 @@ def test_local_url_and_remote_flag_are_shell_only(tmp_path, clean_env, monkeypat
     finally:  # load_repo_dotenv writes os.environ directly; do not leak into other tests
         for name in loaded:
             os.environ.pop(name, None)
+
+
+def test_local_provider_review_sends_the_review_prompts(fake, sample_repo, clean_env, monkeypatch):
+    from argonauta.prompts import REVIEW_SYSTEM_PROMPT, ReviewRequest
+    monkeypatch.setenv("ARGONAUTA_PROVIDER", "local")
+    monkeypatch.setenv("ARGONAUTA_LOCAL_URL", fake.url)
+    monkeypatch.setenv("ARGONAUTA_LOCAL_MODEL", "qwen")
+    req = ReviewRequest(mode="code", source_kind="worktree", source_label="Working tree", diff="diff --git a/a b/a\n", omitted_files=[], comments=[], draft="", pr_title="", pr_body="", repo_summary="root: demo")
+    reply = get_provider(load_settings(sample_repo)).review(req)
+    assert reply.text == REPLY
+    messages = fake.requests[0]["body"]["messages"]
+    assert messages[0]["role"] == "system" and messages[0]["content"].startswith(REVIEW_SYSTEM_PROMPT.splitlines()[0])
+    assert messages[1]["role"] == "user" and "<mode>" in messages[1]["content"]
