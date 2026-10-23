@@ -425,6 +425,28 @@ def diff_file(repo_root: Path, path: str, area: str) -> str:
     return proc.stdout
 
 
+def default_base_branch(repo_root: Path) -> str | None:
+    """`main` when it exists, else `master`, else None."""
+    for name in ("main", "master"):
+        if run_git(repo_root, "rev-parse", "--verify", "--quiet", f"refs/heads/{name}", check=False).returncode == 0:
+            return name
+    return None
+
+
+def range_diff(repo_root: Path, base: str) -> str:
+    """What HEAD adds since it forked from `base` (`git diff base...HEAD`)."""
+    return run_git(repo_root, "diff", END, f"{_ref(base)}...HEAD").stdout
+
+
+def worktree_diff(repo_root: Path) -> str:
+    """Every uncommitted change against HEAD, untracked files included."""
+    out = run_git(repo_root, "diff", END, "HEAD").stdout if has_commits(repo_root) else ""
+    for entry in status_detail(repo_root):
+        if entry.untracked:
+            out += diff_file(repo_root, entry.path, "worktree")
+    return out
+
+
 def stage(repo_root: Path, paths: list[str]) -> None:
     if paths:
         run_git(repo_root, "add", "-A", "--", *paths)

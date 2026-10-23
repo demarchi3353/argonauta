@@ -8,17 +8,24 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
-from argonauta import gitops
+from argonauta import github, gitops
 from argonauta.config import Settings
 from argonauta.db import Store, StoreError
 from argonauta.diffs import ValidationResult, validate_diff
 from argonauta.indexer import search
 from argonauta.logging_setup import get_logger
-from argonauta.models import Change, Proposal, TestRun
-from argonauta.prompts import ContextFile, ProposalRequest, parse_reply
+from argonauta.models import REVIEW_MODES, REVIEW_SOURCES, Change, Proposal, Review, TestRun
+from argonauta.prompts import (
+    ContextFile,
+    ProposalRequest,
+    ReviewComment,
+    ReviewRequest,
+    parse_reply,
+    parse_review_reply,
+)
 from argonauta.providers import ProviderError, ProviderUnavailable, get_provider
 from argonauta.runner import RunnerError, run_tests
 
@@ -231,6 +238,232 @@ def propose(
     return ProposeOutcome(proposal=proposal, context=context, validation=validation, apply_problem=apply_problem)
 
 
+# ----- review -----------------------------------------------------------------
+DIFF_CHAR_LIMIT = 300_000
+COMMENT_LIMIT = 200
+DRAFT_CHAR_LIMIT = 20_000
+ALL_FILES_OMITTED_NOTE = "every file was omitted because the diff exceeds the limit"
+_SHA_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
+_HEADER_PATHS_RE = re.compile(r"^a/(.*) b/(.*)$")
+_FILE_HEADER_RE = re.compile(r"^diff --git ", re.MULTILINE)
+
+
+@dataclass
+class ReviewSpec:
+    mode: str
+    source_kind: str
+    source_ref: str = ""
+    draft: str = ""
+
+
+@dataclass
+class ReviewOutcome:
+    review: Review
+    request: ReviewRequest
+
+
+@dataclass
+class _Source:
+    label: str
+    diff: str
+    comments: list[ReviewComment] = field(default_factory=list)
+    pr_title: str = ""
+    pr_body: str = ""
+    source_ref: str = ""
+
+
+def _chunk_path(header: str) -> str:
+    """The new-side path of a `diff --git` header line (same rule as patch.js)."""
+    rest = header.rstrip("\r\n")[len("diff --git "):]
+    m = _HEADER_PATHS_RE.match(rest)
+    if m:
+        return m.group(2)
+    if rest.endswith('"') and ' "' in rest:  # quoted path: diff --git "a/x y" "b/x y"
+        quoted = rest[rest.rindex(' "') + 2:-1]
+        return quoted[2:] if quoted.startswith("b/") else quoted
+    return rest
+
+
+def truncate_diff(diff: str, limit: int = DIFF_CHAR_LIMIT) -> tuple[str, list[str]]:
+    """Drop whole files, largest first, until the diff fits in `limit` characters.
+
+    The diff is split at column-0 `diff --git ` lines (inside a hunk every line
+    starts with "+", "-", " " or "\\", so these are always file boundaries). Text
+    before the first header is kept as is. Among files of equal size the later
+    one is dropped first. Returns the kept diff and the dropped paths in their
+    original order.
+    """
+    preamble = ""
+    chunks: list[str] = []
+    for line in diff.splitlines(keepends=True):
+        if line.startswith("diff --git "):
+            chunks.append(line)
+        elif chunks:
+            chunks[-1] += line
+        else:
+            preamble += line
+    total = len(diff)
+    dropped: set[int] = set()
+    for i in sorted(range(len(chunks)), key=lambda i: (-len(chunks[i]), -i)):
+        if total <= limit:
+            break
+        dropped.add(i)
+        total -= len(chunks[i])
+    kept = preamble + "".join(c for i, c in enumerate(chunks) if i not in dropped)
+    return kept, [_chunk_path(chunks[i].split("\n", 1)[0]) for i in sorted(dropped)]
+
+
+def validate_review_spec(spec: ReviewSpec) -> None:
+    if spec.mode not in REVIEW_MODES:
+        raise ValidationError(f"Unknown review mode {spec.mode!r}; expected one of {', '.join(sorted(REVIEW_MODES))}.")
+    if spec.source_kind not in REVIEW_SOURCES:
+        raise ValidationError(f"Unknown review source {spec.source_kind!r}; expected one of {', '.join(sorted(REVIEW_SOURCES))}.")
+    if spec.mode == "received" and spec.source_kind != "pr":
+        raise ValidationError("Reviewing received comments needs a pull request as the source.")
+    if spec.mode == "mine":
+        if not spec.draft.strip():
+            raise ValidationError("The draft review is empty; paste the review you want checked.")
+        if len(spec.draft) > DRAFT_CHAR_LIMIT:
+            raise ValidationError(f"The draft review is longer than {DRAFT_CHAR_LIMIT} characters.")
+    ref = spec.source_ref.strip()
+    if spec.source_kind == "commit" and not _SHA_RE.match(ref):
+        raise ValidationError("The commit must be a SHA of 7 to 40 hexadecimal characters.")
+    if spec.source_kind == "pr" and not (ref.isascii() and ref.isdigit() and int(ref) > 0):
+        raise ValidationError("The pull request must be given by its number (a positive integer).")
+
+
+def _source_worktree(settings: Settings) -> _Source:
+    return _Source(label="Working tree", diff=gitops.worktree_diff(settings.repo_root))
+
+
+def _source_commit(settings: Settings, sha: str) -> _Source:
+    try:
+        detail = gitops.commit_detail(settings.repo_root, sha)
+    except gitops.GitError as exc:
+        raise WorkflowError(f"Could not read commit {sha}: {exc}") from exc
+    c = detail.commit
+    return _Source(label=f"commit {c.short} {c.subject}", diff=detail.diff, source_ref=c.sha)
+
+
+def _source_branch(settings: Settings) -> _Source:
+    root = settings.repo_root
+    base = gitops.default_base_branch(root)
+    if base is None:
+        raise WorkflowError("No main or master branch to compare against")
+    branch = gitops.current_branch(root)
+    return _Source(label=f"{branch} vs {base}", diff=gitops.range_diff(root, base), source_ref=base)
+
+
+def _source_pr(settings: Settings, number: int, with_comments: bool) -> _Source:
+    root = settings.repo_root
+    try:
+        pr = github.pr_detail(root, number)
+        diff = github.pr_diff(root, number)
+        raw_comments = github.pr_comments(root, number) if with_comments else []
+    except github.GitHubError as exc:
+        raise WorkflowError(str(exc)) from exc
+    comments = [
+        ReviewComment(author=c.get("author") or "", body=c.get("body") or "", path=c.get("path"), line=c.get("line"), hunk=c.get("hunk") or "")
+        for c in raw_comments
+    ]
+    title = pr.get("title") or ""
+    return _Source(label=f"PR #{number} {title}", diff=diff, comments=comments, pr_title=title, pr_body=pr.get("body") or "", source_ref=str(number))
+
+
+def _build_source(settings: Settings, spec: ReviewSpec) -> _Source:
+    kind, ref = spec.source_kind, spec.source_ref.strip()
+    if kind == "worktree":
+        return _source_worktree(settings)
+    if kind == "commit":
+        return _source_commit(settings, ref)
+    if kind == "branch":
+        return _source_branch(settings)
+    return _source_pr(settings, int(ref), with_comments=spec.mode == "received")
+
+
+def review(
+    settings: Settings,
+    store: Store,
+    spec: ReviewSpec,
+    *,
+    on_progress: Callable[[str], None] | None = None,
+) -> ReviewOutcome:
+    validate_review_spec(spec)
+    if on_progress:
+        on_progress("reading the source")
+    source = _build_source(settings, spec)
+
+    # Read DIFF_CHAR_LIMIT at call time so tests can lower it.
+    diff, omitted = truncate_diff(source.diff, DIFF_CHAR_LIMIT)
+    notes: list[str] = []
+    omitted_set = set(omitted)
+    comments = [replace(c, file_omitted=True) if c.path in omitted_set else c for c in source.comments]
+    if len(comments) > COMMENT_LIMIT:
+        notes.append(f"{len(comments) - COMMENT_LIMIT} later comments were not sent")
+        comments = comments[:COMMENT_LIMIT]
+    if omitted and not _FILE_HEADER_RE.search(diff):
+        notes.append(ALL_FILES_OMITTED_NOTE)
+
+    summary_text = repo_summary(settings, store) if store.file_count() > 0 else f"root: {settings.repo_root.name}"
+    request = ReviewRequest(
+        mode=spec.mode,
+        source_kind=spec.source_kind,
+        source_label=source.label,
+        diff=diff,
+        omitted_files=omitted,
+        comments=comments,
+        draft=spec.draft if spec.mode == "mine" else "",
+        pr_title=source.pr_title,
+        pr_body=source.pr_body,
+        repo_summary=summary_text,
+        notes=notes,
+    )
+    stored = dict(
+        mode=spec.mode,
+        source_kind=spec.source_kind,
+        source_ref=source.source_ref,
+        source_label=source.label,
+        source_diff=diff,
+        omitted_files=omitted,
+        comments=[asdict(c) for c in comments],
+        draft=request.draft,
+    )
+
+    provider = get_provider(settings)
+    if on_progress:
+        on_progress(f"asking {provider.name} for a review")
+    try:
+        reply = provider.review(request, on_progress)
+    except ProviderUnavailable:
+        raise
+    except ProviderError as exc:
+        failed = store.create_review(**stored, provider=provider.name, model="", status="failed", summary="", findings=[], raw=str(exc))
+        store.record_event("review.failed", f"review {failed.id}: provider {provider.name}: {exc}", "reviews", failed.id)
+        log.warning("review failed id=%s provider=%s", failed.id, provider.name)
+        raise WorkflowError(str(exc)) from exc
+
+    parsed = parse_review_reply(reply.text)
+    findings = list(parsed.findings)  # empty when the reply did not parse
+    if notes:
+        findings.append({"kind": "finding", "severity": "low", "title": "Not everything was sent", "body": "\n".join(notes)})
+    saved = store.create_review(
+        **stored,
+        provider=provider.name,
+        model=reply.model,
+        status="ok" if parsed.ok else "unparsed",
+        summary=parsed.summary if parsed.ok else "",
+        findings=findings,
+        raw=reply.text,
+        input_tokens=reply.input_tokens,
+        output_tokens=reply.output_tokens,
+    )
+    n = len(saved.findings)
+    disagree = sum(1 for f in saved.findings if f.get("verdict") == "disagree")
+    store.record_event("review", f"review {saved.id}: {spec.mode} of {source.label}, {n} findings, {disagree} disagree", "reviews", saved.id)
+    log.info("review id=%s status=%s findings=%s provider=%s", saved.id, saved.status, n, provider.name)
+    return ReviewOutcome(review=saved, request=request)
+
+
 # ----- apply / test / commit --------------------------------------------------
 @dataclass
 class ApplyOutcome:
@@ -406,6 +639,8 @@ __all__ = [
     "ApplyOutcome",
     "ContextSelection",
     "ProposeOutcome",
+    "ReviewOutcome",
+    "ReviewSpec",
     "StoreError",
     "ValidationError",
     "WorkflowError",
@@ -415,8 +650,11 @@ __all__ = [
     "propose",
     "reject_proposal",
     "revert_proposal",
+    "review",
     "run_tests_now",
     "select_context",
     "test_command_for",
+    "truncate_diff",
+    "validate_review_spec",
     "validate_task",
 ]
