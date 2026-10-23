@@ -344,6 +344,18 @@ def test_credentials_endpoint(api):
     assert data["ssh"]["kind"] in ("none", "ssh", "https", "local")
 
 
+def test_state_reports_terminal_support(api, monkeypatch):
+    from argonauta.web import terminal as terminal_mod
+    from argonauta.web.terminal import TerminalSupport
+    r = f"/api/repos/{api.repo.id}"
+    assert api.get(f"{r}/state")[1]["terminal"] == {"available": True, "reason": None}
+    off = TerminalSupport(False, "conpty", "needs pywinpty")
+    monkeypatch.setattr(type(api.ctx.terminals), "support", property(lambda self: off))
+    monkeypatch.setattr(terminal_mod, "terminal_support", lambda backend=None: off)
+    assert api.get(f"{r}/state")[1]["terminal"] == {"available": False, "reason": "needs pywinpty"}
+    assert api.post(f"{r}/terminals", {"cols": 80, "rows": 24})[0] == 409
+
+
 @pytest.mark.skipif(os.name != "posix", reason="pty backend")
 def test_terminal_create_list_delete(api):
     r = f"/api/repos/{api.repo.id}"

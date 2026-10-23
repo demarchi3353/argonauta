@@ -214,6 +214,11 @@
     $("#branch-pill").textContent = st ? (st.branch + (st.upstream ? " → " + st.upstream + " (" + st.ahead + "↑ " + st.behind + "↓)" : " (no upstream)")) : "no repository";
     renderRemoteButtons();
     const noRepoBox = $("#no-repo");
+    if (st) {
+      const term = st.terminal || { available: true, reason: null };
+      const tb = document.querySelector('[data-rail="terminal"]');
+      if (tb) { tb.disabled = !term.available; tb.title = term.available ? "New terminal" : term.reason; }
+    }
     if (!st) {
       $("#branch-list").innerHTML = ""; $("#remote-branch-list").innerHTML = ""; $("#branch-count").textContent = ""; $("#remote-count").textContent = ""; renderChanges(null); $("#store-missing").hidden = true; $("#assistant").hidden = true;
       const ws = S.workspaces.find((w) => w.id === S.workspaceId);
@@ -516,6 +521,7 @@
   }
   async function openTerminal() {
     if (!S.repoId) { toast("warn", "Terminals belong to a repository: select one in the repository switcher at the top, or add one to this workspace with “+ Repo”."); return; }
+    if (S.state && S.state.terminal && !S.state.terminal.available) { toast("bad", S.state.terminal.reason); return; }
     let data;
     try { data = await api("POST", rp("/terminals"), { cols: 120, rows: 30 }); } catch (err) { toast("bad", "Terminal: " + err.message); return; }
     const t = data.terminal, tabs = $("#bottom-tabs");

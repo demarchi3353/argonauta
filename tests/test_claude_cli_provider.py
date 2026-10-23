@@ -12,6 +12,8 @@ from argonauta.prompts import ContextFile, ProposalRequest
 from argonauta.providers import describe_provider, get_provider
 from argonauta.providers.base import ProviderError, ProviderUnavailable
 
+pytestmark = pytest.mark.skipif(os.name != "posix", reason="fake binaries are sh scripts")
+
 REPLY = "Short explanation.\n\n```diff\ndiff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-x\n+y\n```\n"
 
 

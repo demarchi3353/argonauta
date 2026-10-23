@@ -28,14 +28,24 @@ argonauta history
 
 ## Setup
 
-Requirements: Python 3.12 or newer, git 2.24 or newer, macOS or Linux (Windows
-via WSL). A browser for the web UI; any recent Chrome, Firefox or Safari works.
+Requirements: Python 3.12 or newer, git 2.24 or newer, macOS, Linux or Windows 10 (1809+). A browser for the web UI; any recent Chrome, Firefox or Safari works.
 
 ```
 scripts/install.sh         # creates .venv, installs argonauta[anthropic,dev], copies .env.example to .env
 scripts/dev.sh --help      # run the CLI from source
 scripts/dev.sh ui          # run the web UI from source
 ```
+
+On Windows:
+
+```
+py -3.12 -m venv .venv
+.venv\Scripts\python -m pip install -e ".[anthropic,dev,windows]"
+.venv\Scripts\argonauta ui
+```
+
+The `windows` extra installs `pywinpty`, which the terminal needs; without it
+everything else works and the terminal button says so.
 
 The assistant needs a model. Four ways; `auto` tries the first two in order
 and falls back to manual:
@@ -183,6 +193,9 @@ workspace called "Default".
   check it out, use the trash icon to delete it (a confirmation asks first,
   and unmerged branches ask again). "+ Branch" creates a branch from HEAD and
   checks it out. Remote branches can be checked out as tracking branches.
+  The filter field at the top of the panel narrows both lists as you type;
+  remote branches are grouped by remote, and long names wrap instead of being
+  cut off.
 - **Fetch, Pull, Push** run in the background and report git's own message.
   Pull is fast-forward only. Push offers to set the upstream when there is
   none. These use your shell's SSH agent or credential helper; a remote that
@@ -197,6 +210,12 @@ workspace called "Default".
 repository, with your normal environment; the tab is named after the
 repository and you can open several. It is wired to the page through a
 WebSocket on the same loopback server.
+
+The shell is `$SHELL` (or zsh, bash, sh) on macOS and Linux, and PowerShell 7,
+Windows PowerShell or cmd on Windows. Set `ARGONAUTA_SHELL` to the path of an
+executable to force a different one. The Windows terminal runs through ConPTY
+via `pywinpty`; if that package is missing the terminal button is disabled and
+its tooltip says what to install.
 
 This is the most sensitive feature in Argonauta: anyone who can reach the
 server with the token can run commands as you. The protections are that the
@@ -271,7 +290,7 @@ the draft or the Review button.
 ### Keyboard and states
 
 Shortcuts: `1`–`4` inspector tabs (Detail, Changes, Proposals, Credentials),
-`5` Review, `r` review, `p` proposal field, `c` commit message, `t` new terminal, `/` filter commits,
+`5` Review, `r` review, `p` proposal field, `c` commit message, `t` new terminal, `b` toggles the Branches panel, `/` filter commits,
 `?` help, `Esc` closes dialogs, the diff view, the review report, the branches panel and menus.
 Every control is reachable
 with Tab and has a visible focus ring; arrows move through the commit list
@@ -469,7 +488,9 @@ argonauta/
     api.py               JSON routes for workspaces, git, assistant, credentials, terminals
     jobs.py              background jobs (one per repository at a time), polled by the page
     websocket.py         minimal RFC 6455 server side for the terminal
-    terminal.py          pty sessions: spawn, resize, read/write, non-blocking shutdown
+    terminal.py          backend selection, support check, manager
+    terminal_posix.py    pty sessions (macOS, Linux)
+    terminal_windows.py  ConPTY sessions through pywinpty (Windows)
     credentials.py       read-only SSH / GPG / identity inspection
     graph.py             lane assignment for the commit graph
     static/              index.html, app.js, app.css and vendor/ (xterm.js, MIT; fonts, OFL)
@@ -600,6 +621,8 @@ thread and real pty shells, not mocks:
   deletion stay with `git` itself (the terminal tab is right there).
 - **Terminal tabs do not survive a page reload**; the shell is closed when the
   socket closes.
+- The Windows terminal needs the pywinpty extra and has been exercised on one
+  machine only; the shell scripts in scripts/ are POSIX.
 - **No security certification.** Input validation and the protected-path rules
   are tested, but this is a personal tool: review every diff before `apply`.
 

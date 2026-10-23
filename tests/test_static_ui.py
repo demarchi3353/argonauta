@@ -242,3 +242,9 @@ def test_branch_filter_and_grouping():
     assert 'class="group" role="presentation"' in js and "data-remote-branch=" in js
     assert "#side-branches .list li .name { white-space: normal; overflow-wrap: anywhere; }" in css
     assert ".side { width: 280px;" in css
+
+
+def test_terminal_button_reflects_support():
+    js = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "st.terminal" in js and 'data-rail="terminal"' in js
+    assert "function openTerminal" in js and "terminal.available" in js
