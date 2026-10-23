@@ -11,7 +11,7 @@
 
   const S = {
     token: null, workspaces: [], workspaceId: null, repoId: null, stateSeq: 0, state: null, graph: [], proposals: [], events: [],
-    selection: null, rightTab: "detail", bottomTab: "proposals", terminals: new Map(), busy: new Set(), filter: "", pollTimer: null,
+    selection: null, inspectorTab: "detail", bottomTab: "events", terminals: new Map(), busy: new Set(), filter: "", pollTimer: null,
   };
 
   // ----- token and api -----------------------------------------------------------------
@@ -64,6 +64,7 @@
     const assistantBusy = ["index", "propose", "test", "apply"].some((k) => S.busy.has(k));
     ["propose", "index", "test"].forEach((k) => { const b = $("#btn-" + k); if (b) b.disabled = assistantBusy; });
     $("#btn-commit").disabled = S.busy.has("commit") || noRepo;
+    renderRail();
   }
   function setRepoControls(enabled, reason) {
     REPO_BUTTONS.forEach((id) => { const b = $("#" + id); if (!b) return; b.disabled = !enabled; b.title = enabled ? "" : reason; });
@@ -209,9 +210,9 @@
 
   function renderChanges(status) {
     const staged = $("#staged-list"), unstaged = $("#unstaged-list");
-    if (!status) { staged.innerHTML = ""; unstaged.innerHTML = ""; $("#changes-count").textContent = ""; $("#changes-empty").hidden = true; return; }
+    if (!status) { staged.innerHTML = ""; unstaged.innerHTML = ""; $("#changes-empty").hidden = true; S.changeCount = 0; renderRail(); return; }
     const total = status.staged.length + status.unstaged.length + status.untracked.length + status.conflicted.length;
-    $("#changes-count").textContent = total ? total + " changed" : ""; $("#changes-empty").hidden = total > 0;
+    S.changeCount = total; renderRail(); $("#changes-empty").hidden = total > 0;
     const conflicts = $("#conflicts"); conflicts.hidden = !status.conflicted.length;
     conflicts.textContent = status.conflicted.length ? "Conflicts in: " + status.conflicted.map((e) => e.path).join(", ") + ". Resolve them with git, then stage." : "";
     const row = (e, area, code) => '<li><input type="checkbox" aria-label="' + (area === "index" ? "Unstage " : "Stage ") + esc(e.path) + '" data-toggle="' + area + '" data-path="' + esc(e.path) + '"' + (area === "index" ? " checked" : "") + '><span class="code ' + esc(code) + '">' + esc(code) + '</span><button type="button" class="path" data-diff="' + area + '" data-path="' + esc(e.path) + '">' + esc(e.path) + '</button><button type="button" class="btn mini ghost" data-discard="' + esc(e.path) + '" aria-label="Discard changes in ' + esc(e.path) + '" title="Discard changes">' + ic("i-undo") + '</button></li>';
@@ -259,13 +260,13 @@
     }).join("") + "</div>";
   }
   async function showFileDiff(area, path) {
-    S.selection = { type: "file", area, path }; selectTab("right", "detail");
+    S.selection = { type: "file", area, path }; selectTab("inspector", "detail");
     const pane = $("#pane-detail"); pane.innerHTML = '<div class="muted"><span class="spinner"></span>Loading ' + esc(path) + "…</div>";
     try { const d = await api("GET", rp("/diff?path=" + encodeURIComponent(path) + "&area=" + area)); pane.innerHTML = "<h2>" + esc(path) + " · " + (area === "index" ? "staged" : "working tree") + "</h2>" + diffHtml(d.diff); }
     catch (err) { pane.innerHTML = '<div class="empty">✗ ' + esc(err.message) + "</div>"; }
   }
   async function showCommit(sha) {
-    S.selection = { type: "commit", sha }; selectTab("right", "detail"); renderGraph();
+    S.selection = { type: "commit", sha }; selectTab("inspector", "detail"); renderGraph();
     const pane = $("#pane-detail"); pane.innerHTML = '<div class="muted"><span class="spinner"></span>Loading commit…</div>';
     try {
       const d = await api("GET", rp("/commits/" + sha));
@@ -275,7 +276,7 @@
     } catch (err) { pane.innerHTML = '<div class="empty">✗ ' + esc(err.message) + "</div>"; }
   }
   async function showProposal(pid) {
-    S.selection = { type: "proposal", id: pid }; selectTab("right", "detail");
+    S.selection = { type: "proposal", id: pid }; selectTab("inspector", "detail");
     const pane = $("#pane-detail"); pane.innerHTML = '<div class="muted"><span class="spinner"></span>Loading proposal…</div>';
     try {
       const d = await api("GET", rp("/proposals/" + pid)); const p = d.proposal, ch = d.change, runs = d.test_runs;
@@ -287,7 +288,7 @@
     } catch (err) { pane.innerHTML = '<div class="empty">✗ ' + esc(err.message) + "</div>"; }
   }
   async function showCredentials() {
-    selectTab("right", "credentials"); const pane = $("#pane-credentials");
+    selectTab("inspector", "credentials"); const pane = $("#pane-credentials");
     if (!S.repoId) { pane.innerHTML = '<div class="empty">Select a repository first.</div>'; return; }
     pane.innerHTML = '<div class="muted"><span class="spinner"></span>Inspecting credentials…</div>';
     try {
@@ -309,6 +310,7 @@
     if (!S.repoId) { emptyBox.textContent = "Select a repository to use the assistant."; emptyBox.hidden = false; }
     else { emptyBox.textContent = "No proposals yet. Describe a change above."; emptyBox.hidden = S.proposals.length > 0 || !(S.state && S.state.store.initialized); }
     table.hidden = !S.proposals.length;
+    renderRail();
     body.innerHTML = S.proposals.map((p) => "<tr tabindex='0' data-prop='" + p.id + "'><td>" + p.id + "</td><td>" + esc(p.status) + "</td><td>" + (p.last_test ? esc(p.last_test.status) : "–") + "</td><td>" + (p.change && p.change.commit_sha ? esc(p.change.commit_sha.slice(0, 8)) : "–") + "</td><td>" + esc(p.task) + "</td></tr>").join("");
     $("tbody", $("#events-table")).innerHTML = S.events.map((e) => "<tr><td>" + esc(e.ts.slice(0, 19).replace("T", " ")) + "</td><td>" + esc(e.kind) + "</td><td>" + esc(e.message) + "</td></tr>").join("") || "<tr><td colspan='3' class='muted'>No events yet.</td></tr>";
   }
@@ -371,7 +373,7 @@
     const e = S.terminals.get(id); if (!e) return;
     try { e.ws.close(); } catch (err) { /* ignore */ }
     try { await api("DELETE", "/api/terminals/" + id); } catch (err) { /* already gone */ }
-    e.term.dispose(); e.tab.remove(); e.pane.remove(); S.terminals.delete(id); selectTab("bottom", "proposals");
+    e.term.dispose(); e.tab.remove(); e.pane.remove(); S.terminals.delete(id); selectTab("bottom", "events");
   }
   window.addEventListener("resize", () => S.terminals.forEach((e) => { if (!e.pane.hidden) e.fit.fit(); }));
 
@@ -425,17 +427,40 @@
   }
 
   // ----- tabs ------------------------------------------------------------------------------
+  const INSPECTOR_TABS = ["detail", "changes", "proposals", "credentials"];
   function selectTab(region, name) {
-    if (region === "right") {
-      S.rightTab = name;
-      $$(".right .tab").forEach((t) => t.setAttribute("aria-selected", String(t.dataset.tab === name)));
-      $("#pane-detail").hidden = name !== "detail"; $("#pane-credentials").hidden = name !== "credentials";
+    if (region === "inspector") {
+      S.inspectorTab = name;
+      $$("#inspector-tabs .tab").forEach((t) => { const on = t.dataset.tab === name; t.setAttribute("aria-selected", String(on)); t.tabIndex = on ? 0 : -1; });
+      INSPECTOR_TABS.forEach((n) => { $("#pane-" + n).hidden = n !== name; });
+      $$("#rail [data-rail]").forEach((b) => { if (INSPECTOR_TABS.includes(b.dataset.rail)) b.setAttribute("aria-pressed", String(b.dataset.rail === name)); });
     } else {
       S.bottomTab = name;
       $$("#bottom-tabs .tab").forEach((t) => t.setAttribute("aria-selected", String(t.dataset.tab === name)));
-      $("#pane-proposals").hidden = name !== "proposals"; $("#pane-events").hidden = name !== "events";
+      $("#pane-events").hidden = name !== "events";
       S.terminals.forEach((e) => { e.pane.hidden = e.tab.dataset.tab !== name; if (!e.pane.hidden) { e.fit.fit(); e.term.focus(); } });
     }
+  }
+  function renderRail() {
+    const n = S.changeCount || 0, busy = S.busy.has("propose") || S.busy.has("apply");
+    const set = (id, text) => { const b = $("#" + id); b.textContent = text; b.hidden = !text; };
+    set("badge-changes", n ? String(n) : ""); set("count-changes", n ? String(n) : "");
+    set("badge-proposals", busy ? "…" : ""); set("count-proposals", S.proposals.length ? String(S.proposals.length) : "");
+  }
+  function onRail(ev) {
+    const b = ev.target.closest("[data-rail]"); if (!b) return; const k = b.dataset.rail;
+    if (k === "repos") { if ($("#repo-menu").open) closeRepoMenu(); else openRepoMenu(b); }
+    else if (k === "credentials") showCredentials();
+    else if (k === "changes" || k === "proposals") selectTab("inspector", k);
+    else if (k === "terminal") openTerminal();
+    else if (k === "events") selectTab("bottom", "events");
+    else if (k === "model") openModelDialog();
+    // "branches" stays a no-op until the panel gets its toggle
+  }
+  function onInspectorKey(ev) {
+    if (ev.key !== "ArrowLeft" && ev.key !== "ArrowRight") return; const t = ev.target.closest(".tab"); if (!t) return;
+    const i = INSPECTOR_TABS.indexOf(t.dataset.tab), name = INSPECTOR_TABS[(i + (ev.key === "ArrowRight" ? 1 : INSPECTOR_TABS.length - 1)) % INSPECTOR_TABS.length];
+    ev.preventDefault(); if (name === "credentials") showCredentials(); else selectTab("inspector", name); $("#tab-" + name).focus();
   }
 
   // ----- event wiring -----------------------------------------------------------------------
@@ -469,7 +494,9 @@
     $("#model-form").addEventListener("submit", saveModelSettings);
     $("#provider-choice").addEventListener("change", syncLocalSection);
     $("#model-cancel").addEventListener("click", () => $("#model-dialog").close());
-    $$(".right .tab").forEach((t) => t.addEventListener("click", () => { if (t.dataset.tab === "credentials") showCredentials(); else selectTab("right", "detail"); }));
+    $("#rail").addEventListener("click", onRail);
+    $("#inspector-tabs").addEventListener("click", (ev) => { const t = ev.target.closest(".tab"); if (!t) return; if (t.dataset.tab === "credentials") showCredentials(); else selectTab("inspector", t.dataset.tab); });
+    $("#inspector-tabs").addEventListener("keydown", onInspectorKey);
     $("#bottom-tabs").addEventListener("click", (ev) => { const t = ev.target.closest(".tab"); if (t && !ev.target.classList.contains("close")) selectTab("bottom", t.dataset.tab); });
     $("#branch-list").addEventListener("click", async (ev) => {
       const del = ev.target.closest("[data-del-branch]"); const li = ev.target.closest("[data-branch]");
@@ -479,7 +506,7 @@
     $("#branch-list").addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.target.dataset.branch) ev.target.click(); });
     $("#remote-branch-list").addEventListener("click", async (ev) => { const li = ev.target.closest("[data-remote-branch]"); if (!li) return; const name = li.dataset.remoteBranch.split("/").slice(1).join("/"); if (await dialog("Checkout remote branch", "Create local branch " + name + " tracking " + li.dataset.remoteBranch + "?", { ok: "Checkout" })) { try { await api("POST", rp("/branches"), { name, from: li.dataset.remoteBranch }); await api("POST", rp("/checkout"), { name }); toast("ok", "Checked out " + name); await refreshAll(); } catch (e) { toast("bad", e.message, true); } } });
     $("#btn-new-branch").addEventListener("click", async () => { if (!S.repoId) return; const name = await dialog("New branch", "Created from the current HEAD and checked out.", { input: "Branch name", ok: "Create" }); if (!name) return; try { await api("POST", rp("/branches"), { name }); await api("POST", rp("/checkout"), { name }); toast("ok", "On " + name); await refreshAll(); } catch (e) { toast("bad", e.message, true); } });
-    const changes = $(".left");
+    const changes = $("#pane-changes");
     changes.addEventListener("change", async (ev) => { const cb = ev.target.closest("[data-toggle]"); if (!cb) return; const path = cb.dataset.path, area = cb.dataset.toggle; try { await api("POST", rp(area === "index" ? "/unstage" : "/stage"), { paths: [path] }); } catch (e) { toast("bad", e.message); } await refreshState(); if (S.selection && S.selection.type === "file" && S.selection.path === path) showFileDiff(area === "index" ? "worktree" : "index", path); });
     changes.addEventListener("click", async (ev) => {
       const diff = ev.target.closest("[data-diff]"); if (diff) { showFileDiff(diff.dataset.diff, diff.dataset.path); return; }
@@ -522,7 +549,8 @@
     });
     document.addEventListener("keydown", (ev) => {
       const tag = (ev.target.tagName || "").toLowerCase(); if (["input", "textarea", "select"].includes(tag) || ev.target.closest(".xterm") || ev.metaKey || ev.ctrlKey || ev.altKey) return;
-      if (ev.key === "p") { ev.preventDefault(); $("#task").focus(); } if (ev.key === "c") { ev.preventDefault(); $("#commit-message").focus(); } if (ev.key === "t") { ev.preventDefault(); openTerminal(); } if (ev.key === "/") { ev.preventDefault(); $("#commit-filter").focus(); } if (ev.key === "?") { ev.preventDefault(); $("#help").showModal(); }
+      const num = ["1", "2", "3", "4"].indexOf(ev.key); if (num >= 0) { ev.preventDefault(); if (ev.key === "4") showCredentials(); else selectTab("inspector", INSPECTOR_TABS[num]); return; }
+      if (ev.key === "p") { ev.preventDefault(); selectTab("inspector", "proposals"); $("#task").focus(); } if (ev.key === "c") { ev.preventDefault(); selectTab("inspector", "changes"); $("#commit-message").focus(); } if (ev.key === "t") { ev.preventDefault(); openTerminal(); } if (ev.key === "/") { ev.preventDefault(); $("#commit-filter").focus(); } if (ev.key === "?") { ev.preventDefault(); $("#help").showModal(); }
     });
     document.addEventListener("visibilitychange", () => { if (document.hidden) clearInterval(S.pollTimer); else startPolling(); });
   }

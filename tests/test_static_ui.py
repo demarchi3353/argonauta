@@ -50,3 +50,25 @@ def test_topbar_structure():
     # the filter lives in the topbar, between the brand and the git actions
     top = html.split('<header', 1)[1].split('</header>', 1)[0]
     assert 'id="commit-filter"' in top and 'id="btn-push"' in top
+
+
+def test_rail_and_inspector_structure():
+    html = (STATIC / "index.html").read_text()
+    for key in ("repos", "branches", "changes", "proposals", "terminal", "events", "model", "credentials"):
+        assert f'data-rail="{key}"' in html, key
+    assert 'id="badge-changes"' in html and 'id="badge-proposals"' in html
+    for tab in ("detail", "changes", "proposals", "credentials"):
+        assert f'data-tab="{tab}"' in html and f'id="pane-{tab}"' in html, tab
+    assert 'class="left"' not in html
+    changes = html.split('id="pane-changes"', 1)[1].split('id="pane-proposals"', 1)[0]
+    assert 'id="commit-form"' in changes and 'id="staged-list"' in changes
+    proposals = html.split('id="pane-proposals"', 1)[1].split('id="pane-credentials"', 1)[0]
+    assert 'id="propose-form"' in proposals and 'id="proposals-table"' in proposals
+
+
+def test_shortcuts_ignore_text_fields():
+    js = (STATIC / "app.js").read_text()
+    guard = js.split('document.addEventListener("keydown"', 1)[1].split('"visibilitychange"', 1)[0]
+    assert '"input", "textarea", "select"' in guard and ".xterm" in guard
+    for key in ('"1"', '"2"', '"3"', '"4"'):
+        assert key in guard, key
