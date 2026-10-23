@@ -11,7 +11,7 @@
 
   const S = {
     token: null, workspaces: [], workspaceId: null, repoId: null, stateSeq: 0, state: null, graph: [], proposals: [], events: [],
-    selection: null, inspectorTab: "detail", bottomTab: "events", terminals: new Map(), busy: new Set(), filter: "", pollTimer: null,
+    selection: null, inspectorTab: "detail", bottomTab: "events", bottomOpen: false, terminals: new Map(), busy: new Set(), filter: "", pollTimer: null,
   };
 
   // ----- token and api -----------------------------------------------------------------
@@ -362,20 +362,23 @@
     const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws/terminals/" + t.id); ws.binaryType = "arraybuffer";
     const entry = { id: t.id, term, fit, ws, tab, pane, repoId: S.repoId }; S.terminals.set(t.id, entry);
     // Auth must be the first frame: fit() can fire onResize, which would otherwise arrive before it.
-    ws.onopen = () => { ws.send(JSON.stringify({ type: "auth", token: S.token, cols: term.cols, rows: term.rows })); selectTab("bottom", "term-" + t.id); fit.fit(); term.focus(); };
+    ws.onopen = () => { ws.send(JSON.stringify({ type: "auth", token: S.token, cols: term.cols, rows: term.rows })); openBottom("term-" + t.id); };
     ws.onmessage = (ev) => term.write(new Uint8Array(ev.data));
     ws.onclose = () => { term.write("\r\n\x1b[2m[terminal closed]\x1b[0m\r\n"); };
     term.onData((d) => { if (ws.readyState === 1) ws.send(new TextEncoder().encode(d)); });
     term.onResize(({ cols, rows }) => { if (ws.readyState === 1) ws.send(JSON.stringify({ type: "resize", cols, rows })); });
     $(".close", tab).addEventListener("click", (ev) => { ev.stopPropagation(); closeTerminal(t.id); });
+    renderBottomStrip();
   }
   async function closeTerminal(id) {
     const e = S.terminals.get(id); if (!e) return;
     try { e.ws.close(); } catch (err) { /* ignore */ }
     try { await api("DELETE", "/api/terminals/" + id); } catch (err) { /* already gone */ }
-    e.term.dispose(); e.tab.remove(); e.pane.remove(); S.terminals.delete(id); selectTab("bottom", "events");
+    e.term.dispose(); e.tab.remove(); e.pane.remove(); S.terminals.delete(id); renderBottomStrip();
+    if (S.terminals.size === 0) selectTab("bottom", "events");
+    else if (S.bottomTab === "term-" + id) selectTab("bottom", "term-" + S.terminals.keys().next().value);
   }
-  window.addEventListener("resize", () => S.terminals.forEach((e) => { if (!e.pane.hidden) e.fit.fit(); }));
+  window.addEventListener("resize", () => { if (S.bottomOpen) S.terminals.forEach((e) => { if (!e.pane.hidden) e.fit.fit(); }); });
 
   // ----- model settings (user-level, ~/.config/argonauta/settings.json) ------------------
   function pill(id, kind, text) { const el = $("#" + id); el.className = "pill" + (kind ? " " + kind : ""); el.textContent = text; }
@@ -438,9 +441,15 @@
       S.bottomTab = name;
       $$("#bottom-tabs .tab").forEach((t) => t.setAttribute("aria-selected", String(t.dataset.tab === name)));
       $("#pane-events").hidden = name !== "events";
-      S.terminals.forEach((e) => { e.pane.hidden = e.tab.dataset.tab !== name; if (!e.pane.hidden) { e.fit.fit(); e.term.focus(); } });
+      S.terminals.forEach((e) => { e.pane.hidden = e.tab.dataset.tab !== name; if (!e.pane.hidden && S.bottomOpen) { e.fit.fit(); e.term.focus(); } });
     }
   }
+  function renderBottomStrip() { $("#bottom-strip-label").textContent = "Terminals (" + S.terminals.size + ") · Events"; }
+  function setBottomOpen(open) {
+    S.bottomOpen = open; $("#bottom").classList.toggle("open", open); $("#bottom-strip").setAttribute("aria-expanded", String(open));
+  }
+  function openBottom(tab) { setBottomOpen(true); selectTab("bottom", tab || S.bottomTab); }
+  function toggleBottom() { if (S.bottomOpen) setBottomOpen(false); else openBottom(S.bottomTab); }
   function renderRail() {
     const n = S.changeCount || 0, busy = S.busy.has("propose") || S.busy.has("apply");
     const set = (id, text) => { const b = $("#" + id); b.textContent = text; b.hidden = !text; };
@@ -453,7 +462,7 @@
     else if (k === "credentials") showCredentials();
     else if (k === "changes" || k === "proposals") selectTab("inspector", k);
     else if (k === "terminal") openTerminal();
-    else if (k === "events") selectTab("bottom", "events");
+    else if (k === "events") openBottom("events");
     else if (k === "model") openModelDialog();
     // "branches" stays a no-op until the panel gets its toggle
   }
@@ -497,6 +506,7 @@
     $("#rail").addEventListener("click", onRail);
     $("#inspector-tabs").addEventListener("click", (ev) => { const t = ev.target.closest(".tab"); if (!t) return; if (t.dataset.tab === "credentials") showCredentials(); else selectTab("inspector", t.dataset.tab); });
     $("#inspector-tabs").addEventListener("keydown", onInspectorKey);
+    $("#bottom-strip").addEventListener("click", toggleBottom);
     $("#bottom-tabs").addEventListener("click", (ev) => { const t = ev.target.closest(".tab"); if (t && !ev.target.classList.contains("close")) selectTab("bottom", t.dataset.tab); });
     $("#branch-list").addEventListener("click", async (ev) => {
       const del = ev.target.closest("[data-del-branch]"); const li = ev.target.closest("[data-branch]");

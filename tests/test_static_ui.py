@@ -72,3 +72,11 @@ def test_shortcuts_ignore_text_fields():
     assert '"input", "textarea", "select"' in guard and ".xterm" in guard
     for key in ('"1"', '"2"', '"3"', '"4"'):
         assert key in guard, key
+
+
+def test_bottom_panel_lives_under_the_graph():
+    html = (STATIC / "index.html").read_text()
+    center = html.split('id="center"', 1)[1].split('class="inspector"', 1)[0]
+    assert 'id="bottom"' in center and 'id="bottom-strip"' in center and 'aria-expanded' in center
+    assert 'id="terminal-panes"' in center and 'id="pane-events"' in center
+    assert 'data-tab="proposals"' not in center

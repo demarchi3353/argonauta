@@ -31,7 +31,7 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
-body { font: 13px/1.45 var(--font-ui); background: var(--bg-0); color: var(--text); display: grid; grid-template-rows: auto 1fr minmax(180px, 32vh); height: 100vh; }
+body { font: 13px/1.45 var(--font-ui); background: var(--bg-0); color: var(--text); display: grid; grid-template-rows: auto 1fr; height: 100vh; }
 .skip { position: absolute; left: -999px; top: 0; background: var(--accent); color: var(--on-accent); padding: 8px; z-index: 10; }
 .skip:focus { left: 8px; }
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
@@ -75,7 +75,8 @@ h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacin
 .layout { display: grid; grid-template-columns: 44px 240px minmax(320px, 1fr) minmax(360px, 42%); grid-template-rows: 1fr; min-height: 0; }
 .side, .center, .inspector { min-height: 0; overflow: auto; background: var(--bg-1); }
 .side { padding: 10px 12px; border-right: 1px solid var(--line); }
-.center { border-right: 1px solid var(--line); }
+.center { display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; border-right: 1px solid var(--line); }
+.graph-scroll { min-height: 0; overflow: auto; }
 /* rail: 44px icon column, top and bottom groups */
 .rail { display: flex; flex-direction: column; justify-content: space-between; align-items: center; padding: 8px 0; background: var(--bg-1); border-right: 1px solid var(--line); min-height: 0; overflow: auto; }
 .rail-group { display: flex; flex-direction: column; gap: 4px; align-items: center; }
@@ -152,7 +153,14 @@ h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacin
 .table tbody tr { cursor: pointer; }
 .table tbody tr:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
 /* bottom */
-.bottom { display: grid; grid-template-rows: auto 1fr; min-height: 0; border-top: 1px solid var(--line); background: var(--bg-1); }
+.bottom { display: grid; grid-template-rows: 32px; min-height: 0; border-top: 1px solid var(--line); background: var(--bg-1); }
+.bottom.open { grid-template-rows: 32px 1fr; height: max(180px, 32vh); }
+.bottom-body { display: none; min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
+#terminal-panes { min-height: 0; }
+.bottom.open .bottom-body { display: grid; }
+.strip { display: flex; align-items: center; height: 32px; padding: 0 12px; border: 0; background: none; color: var(--muted); font: 500 12px/1 var(--font-ui); cursor: pointer; text-align: left; }
+.strip:hover { background: var(--bg-3); color: var(--text); }
+.term-pane { background: var(--bg-0); }
 .bottom .pane { overflow: auto; }
 .propose-form { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
 .propose-form input[type=text] { flex: 1; min-width: 240px; }
@@ -171,6 +179,8 @@ h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacin
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 1023px) {
   .layout { grid-template-columns: 1fr; grid-auto-rows: minmax(240px, auto); overflow: auto; }
+  .center { overflow: visible; }
+  .graph-scroll { overflow: visible; }
   .rail, .side, .center, .inspector { border-right: 0; border-bottom: 1px solid var(--line); }
   .rail { flex-direction: row; justify-content: flex-start; padding: 4px 8px; }
   .rail-group { flex-direction: row; }

@@ -81,14 +81,26 @@
     <ul id="remote-branch-list" class="list" role="listbox" aria-label="Remote branches"></ul>
   </aside>
 
-  <section class="center" id="graph-panel" aria-label="Commit graph" tabindex="-1">
+  <section class="center" id="center" aria-label="Commit graph">
     <div class="box-head sticky">
       <h2><svg class="ic" aria-hidden="true"><use href="#i-commit"/></svg>Commits</h2>
       <span id="graph-count" class="muted"></span>
     </div>
-    <div id="graph-empty" class="empty" hidden>No commits yet. Stage files and commit to start the graph.</div>
-    <div id="no-repo" class="empty hero" hidden><img class="logo-hero" src="/logo.png" alt="" width="96" height="96"><span id="no-repo-text">No repository selected.</span> <button class="btn mini" id="btn-add-repo-2" type="button"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Add a repository</button></div>
-    <div id="graph" class="graph" role="listbox" aria-label="Commits"></div>
+    <div class="graph-scroll" id="graph-panel" tabindex="-1">
+      <div id="graph-empty" class="empty" hidden>No commits yet. Stage files and commit to start the graph.</div>
+      <div id="no-repo" class="empty hero" hidden><img class="logo-hero" src="/logo.png" alt="" width="96" height="96"><span id="no-repo-text">No repository selected.</span> <button class="btn mini" id="btn-add-repo-2" type="button"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Add a repository</button></div>
+      <div id="graph" class="graph" role="listbox" aria-label="Commits"></div>
+    </div>
+  <section class="bottom" id="bottom" aria-label="Terminals and events">
+    <button class="strip" id="bottom-strip" type="button" aria-expanded="false" aria-controls="bottom-body"><svg class="ic" aria-hidden="true"><use href="#i-terminal"/></svg><span id="bottom-strip-label">Terminals (0) · Events</span></button>
+    <div class="bottom-body" id="bottom-body">
+    <div class="tabs" role="tablist" aria-label="Bottom panels" id="bottom-tabs">
+      <button class="tab" role="tab" data-tab="events" aria-selected="true"><svg class="ic" aria-hidden="true"><use href="#i-activity"/></svg>Events</button>
+    </div>
+    <div id="pane-events" role="tabpanel" class="pane"><table class="table" id="events-table"><thead><tr><th scope="col">Time</th><th scope="col">Kind</th><th scope="col">Message</th></tr></thead><tbody></tbody></table></div>
+    <div id="terminal-panes"></div>
+    </div>
+  </section>
   </section>
 
   <section class="inspector" aria-label="Inspector">
@@ -146,14 +158,6 @@
     <div id="pane-credentials" role="tabpanel" aria-labelledby="tab-credentials" class="pane" hidden></div>
   </section>
 </main>
-
-<section class="bottom" aria-label="Terminals and events">
-  <div class="tabs" role="tablist" aria-label="Bottom panels" id="bottom-tabs">
-    <button class="tab" role="tab" data-tab="events" aria-selected="true"><svg class="ic" aria-hidden="true"><use href="#i-activity"/></svg>Events</button>
-  </div>
-  <div id="pane-events" role="tabpanel" class="pane"><table class="table" id="events-table"><thead><tr><th scope="col">Time</th><th scope="col">Kind</th><th scope="col">Message</th></tr></thead><tbody></tbody></table></div>
-  <div id="terminal-panes"></div>
-</section>
 
 <div id="toasts" class="toasts" aria-live="polite" aria-atomic="false"></div>
 <dialog id="dialog" class="dialog">
