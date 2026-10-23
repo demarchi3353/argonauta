@@ -1,11 +1,11 @@
 /* tokens: Slate Code, dark by default, light under prefers-color-scheme */
 :root {
   --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", var(--font-mono);
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --radius: 4px; --radius-lg: 8px;
   --bg-0: #0f172a; --bg-1: #131c30; --bg-2: #1b2336; --bg-3: #272f42; --line: #2b3650;
   --text: #f1f5f9; --muted: #94a3b8; --accent: #22c55e; --on-accent: #052e16;
-  --ok: #4ade80; --warn: #f97316; --bad: #ef4444; --focus: #fbbf24; --sel: #1a3a35;
+  --ok: #4ade80; --warn: #f97316; --bad: #ef4444; --focus: #fbbf24; --sel: rgba(34,197,94,.12);
   --add-bg: #10301c; --add-text: #9be3b4; --del-bg: #3a1614; --del-text: #f5b2ad; --hunk: #1f2630;
   --lane0: #6ea8fe; --lane1: #fb923c; --lane2: #4ade80; --lane3: #c084fc; --lane4: #22d3ee; --lane5: #f87171;
   color-scheme: dark;
@@ -13,8 +13,8 @@
 @media (prefers-color-scheme: light) {
   :root {
     --bg-0: #f8fafc; --bg-1: #ffffff; --bg-2: #f1f5f9; --bg-3: #e2e8f0; --line: #cbd5e1;
-    --text: #0f172a; --muted: #475569; --accent: #16a34a; --on-accent: #ffffff;
-    --ok: #15803d; --warn: #c2410c; --bad: #b91c1c; --focus: #b45309; --sel: #dcfce7;
+    --text: #0f172a; --muted: #475569; --accent: #15803d; --on-accent: #ffffff;
+    --ok: #15803d; --warn: #c2410c; --bad: #b91c1c; --focus: #b45309; --sel: rgba(22,163,74,.12);
     --add-bg: #e6f4ea; --add-text: #0f5b2a; --del-bg: #fdecea; --del-text: #8a1c14; --hunk: #eef1f5;
     --lane0: #1f5fbf; --lane1: #c2410c; --lane2: #15803d; --lane3: #7e22ce; --lane4: #0e7490; --lane5: #b91c1c;
     color-scheme: light;
@@ -50,7 +50,7 @@ h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacin
 /* controls: 30px buttons, variants, hover = background only */
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-2); color: var(--text); cursor: pointer; font-size: 13px; white-space: nowrap; }
 .btn:hover { background: var(--bg-3); }
-.btn:disabled { opacity: .55; cursor: progress; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; }
 .btn.primary:hover { background: color-mix(in srgb, var(--accent) 88%, white); }
 .btn.danger { color: var(--bad); border-color: var(--bad); background: transparent; }
@@ -155,7 +155,6 @@ h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacin
 .btn.mini .ic, .tree .ic, .list .ic, h2 .ic, h3 .ic { width: 12px; height: 12px; margin-right: 4px; }
 .btn.ghost .ic { margin-right: 0; width: 16px; height: 16px; }
 .tab .ic { opacity: .8; }
-.btn:disabled { cursor: not-allowed; }
 
 /* ----- model sheet: provider choice as a readiness list ----- */
 .sheet { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--bg-1); color: var(--text); padding: 0; width: min(560px, 92vw); max-height: 88vh; overflow: hidden; box-shadow: 0 24px 60px rgba(0,0,0,.35); }
@@ -193,5 +192,5 @@ h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacin
 .sheet .field-error { padding: 0 20px; }
 .sheet-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px 14px; border-top: 1px solid var(--line); margin-top: auto; }
 /* motion: 120ms transitions only when motion is allowed, spinner slowed otherwise */
-@media (prefers-reduced-motion: no-preference) { .btn, .tab, .opt, .tree li, .list li, .files li, .table tbody tr, .graph .row-c { transition: background-color .12s ease, border-color .12s ease; } }
+@media (prefers-reduced-motion: no-preference) { .btn, .tab, .opt, .tree li, .list li, .files li, .table tbody tr, .graph .row-c { transition: background-color .12s ease, color .12s ease; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }

@@ -33,6 +33,8 @@ def test_css_declares_slate_tokens_in_both_schemes():
                         ("--warn", "#f97316"), ("--bad", "#ef4444"), ("--focus", "#fbbf24")):
         assert f"{token}: {dark}" in css, token
     assert "prefers-color-scheme: light" in css
-    assert "--bg-0: #f8fafc" in css and "--accent: #16a34a" in css
+    assert "--bg-0: #f8fafc" in css and "--accent: #15803d" in css
     assert '"IBM Plex Sans"' in css and '"JetBrains Mono"' in css
+    assert "var(--font-mono)" not in css.split("--font-mono:", 1)[1].split(";", 1)[0]
+    assert "--sel: rgba(34,197,94,.12)" in css and "--sel: rgba(22,163,74,.12)" in css
     assert "prefers-reduced-motion: reduce" in css
